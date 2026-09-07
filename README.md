@@ -30,7 +30,7 @@ pnpm 10 and later will initially block the Git dependency's `prepare` script. Th
 
 ```yaml
 allowBuilds:
-  'dsh-aiops@github:jarvan1/dsh-aiops#<resolved-commit-sha>': true
+  'dsh-aiops@https://codeload.github.com/jarvan1/dsh-aiops/tar.gz/<resolved-commit-sha>': true
 ```
 
 Do not replace the printed key with only `dsh-aiops`: pnpm intentionally binds this permission to the exact Git source revision.

@@ -30,7 +30,7 @@ pnpm 10 及更高版本会在首次安装时阻止 Git 依赖的 `prepare` 构�
 
 ```yaml
 allowBuilds:
-  'dsh-aiops@github:jarvan1/dsh-aiops#<resolved-commit-sha>': true
+  'dsh-aiops@https://codeload.github.com/jarvan1/dsh-aiops/tar.gz/<resolved-commit-sha>': true
 ```
 
 不要把 pnpm 输出的键简化成 `dsh-aiops`；该授权会被有意绑定到具体 Git 来源和 revision。
