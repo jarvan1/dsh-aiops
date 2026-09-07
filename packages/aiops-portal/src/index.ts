@@ -1,6 +1,7 @@
 /** Read-only Web portal over durable AIOps Session events and routing audit. */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-aiops-incident-router'
+import { KubernetesQueryError } from '@deepseek-ai/dsh-aiops-kubernetes'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-session-query'
 import z from '@deepseek-ai/schemastery'
@@ -8,7 +9,8 @@ import { testEndpointConnection } from './connectivity.ts'
 import {
   PORTAL_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
-  type ConnectionTarget,
+  type ConnectionTestRequest,
+  type ConnectionTestResult,
 } from './types.ts'
 import { readPortalSnapshot, type PortalLimits } from './snapshot.ts'
 
@@ -17,7 +19,7 @@ export * from './snapshot.ts'
 export * from './types.ts'
 
 export const name = 'aiops-portal'
-export const inject = ['sessionQuery', 'aiopsIncidentRouter']
+export const inject = ['sessionQuery', 'aiopsIncidentRouter', 'kubernetes']
 
 export interface Config {
   readonly maxIncidents?: number
@@ -73,12 +75,42 @@ async function readJsonBody(req: import('node:http').IncomingMessage): Promise<u
   }
 }
 
-function connectionRequest(value: unknown): { target: ConnectionTarget; baseUrl: string } | undefined {
+function connectionRequest(value: unknown): ConnectionTestRequest | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const target = Reflect.get(value, 'target')
-  const baseUrl = Reflect.get(value, 'baseUrl')
-  if ((target !== 'prometheus' && target !== 'alertmanager') || typeof baseUrl !== 'string') return undefined
-  return { target, baseUrl }
+  if (target === 'prometheus' || target === 'alertmanager') {
+    const baseUrl = Reflect.get(value, 'baseUrl')
+    return typeof baseUrl === 'string' ? { target, baseUrl } : undefined
+  }
+  if (target !== 'kubernetes') return undefined
+  const kubeconfig = Reflect.get(value, 'kubeconfig')
+  const context = Reflect.get(value, 'context')
+  if ((kubeconfig !== undefined && typeof kubeconfig !== 'string') || (context !== undefined && typeof context !== 'string')) return undefined
+  return { target, ...(kubeconfig === undefined ? {} : { kubeconfig }), ...(context === undefined ? {} : { context }) }
+}
+
+export async function testPortalConnection(ctx: Context, request: ConnectionTestRequest, signal: AbortSignal): Promise<ConnectionTestResult> {
+  if (request.target !== 'kubernetes') return testEndpointConnection(request.target, request.baseUrl, signal)
+  const started = performance.now()
+  try {
+    const result = await ctx.kubernetes.testConnection({
+      ...(request.kubeconfig === undefined ? {} : { kubeconfig: request.kubeconfig }),
+      ...(request.context === undefined ? {} : { context: request.context }),
+    }, signal)
+    const missingPermissions = Object.entries(result.capabilities).filter(([, allowed]) => !allowed).map(([name]) => name)
+    const latencyMs = Math.max(0, Math.round(performance.now() - started))
+    if (missingPermissions.length > 0) return { ok: false, code: 'rbac_denied', latencyMs, missingPermissions }
+    return { ok: true, latencyMs, kubernetes: { context: result.context, cluster: result.cluster, namespace: result.namespace, server: result.server } }
+  } catch (error: unknown) {
+    const latencyMs = Math.max(0, Math.round(performance.now() - started))
+    if (!(error instanceof KubernetesQueryError)) return { ok: false, code: 'unreachable', latencyMs }
+    const code: import('./types.ts').ConnectionTestFailureCode = error.code === 'invalid_request' ? 'invalid_kubeconfig'
+      : error.code === 'authentication_failed' ? 'authentication_failed'
+        : error.code === 'forbidden' ? 'forbidden'
+          : error.code === 'timeout' ? 'timeout'
+            : error.code === 'credential_exec_missing' ? 'credential_exec_missing' : 'unreachable'
+    return { ok: false, code, latencyMs }
+  }
 }
 
 /** Register the same-origin snapshot endpoint consumed by the browser client module. */
@@ -131,11 +163,7 @@ export function apply(ctx: Context, config: Config): void {
             json(res, 400, { error: 'invalid_request' }, false)
             return
           }
-          json(res, 200, await testEndpointConnection(
-            value.target,
-            value.baseUrl,
-            controller.signal,
-          ), false)
+          json(res, 200, await testPortalConnection(webCtx, value, controller.signal), false)
         } catch (error: unknown) {
           const code = error instanceof Error ? error.message : 'invalid_request'
           const status = code === 'unsupported_media_type' ? 415 : code === 'request_too_large' ? 413 : 400

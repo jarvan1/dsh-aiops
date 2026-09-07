@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a fingerprint router with durable queue/cooldown/resource budgets, the packaged `k8s-diag` skill, three observation Providers, seven observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `ALERTMANAGER_URL`, `PROMETHEUS_URL`, and `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; Kubernetes reads also need kubectl and read-only cluster credentials.
+This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a fingerprint router with durable queue/cooldown/resource budgets, the packaged `k8s-diag` skill, three observation Providers, seven observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; endpoints and the server-side kubeconfig path can be supplied through environment defaults or saved live in the Portal. Kubernetes reads need read-only cluster credentials but do not require kubectl.
 
 ## Table of Contents
 
@@ -107,6 +107,6 @@ Adding or removing the layer changes the visible tool-schema prefix; provider en
 
 - **The layer requires an existing application profile** — it does not include `dsh-base`, an LLM provider, or a task runner.
 - **The listener has no TLS** — keep the default loopback bind behind a TLS reverse proxy, or explicitly protect an all-interface bind with network policy.
-- **Environment-backed endpoints are startup configuration** — changing them requires a profile restart because this layer is intended for the startup-only headless surface.
-- **Read-only credentials remain deployment-owned** — the bundle cannot prove external Alertmanager/Prometheus ACLs or Kubernetes RBAC permissions.
+- **Environment values are composition defaults** — the Web Portal can persist and apply endpoint and kubeconfig selections live.
+- **Read-only credentials remain deployment-owned** — the Portal checks required Kubernetes RBAC, but cannot prove external Alertmanager/Prometheus ACL policy.
 - **One process owns the index path** — do not point another running Session Query Provider at the same `aiops-incidents.sqlite` file.

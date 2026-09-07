@@ -4,7 +4,11 @@ import type { RouteAuditOutcome, RouteAuditRecord } from '@deepseek-ai/dsh-aiops
 export const PORTAL_API_PATH = '/api/aiops/portal'
 export const PORTAL_CONNECTION_TEST_API_PATH = '/api/aiops/portal/connections/test'
 
-export type ConnectionTarget = 'prometheus' | 'alertmanager'
+export type ConnectionTarget = 'prometheus' | 'alertmanager' | 'kubernetes'
+
+export type ConnectionTestRequest =
+  | { readonly target: 'prometheus' | 'alertmanager'; readonly baseUrl: string }
+  | { readonly target: 'kubernetes'; readonly kubeconfig?: string; readonly context?: string }
 
 export type ConnectionTestFailureCode =
   | 'invalid_url'
@@ -13,14 +17,29 @@ export type ConnectionTestFailureCode =
   | 'response_too_large'
   | 'timeout'
   | 'unreachable'
+  | 'authentication_failed'
+  | 'forbidden'
+  | 'credential_exec_missing'
+  | 'rbac_denied'
+  | 'invalid_kubeconfig'
 
 export type ConnectionTestResult =
-  | { readonly ok: true; readonly latencyMs: number }
+  | {
+    readonly ok: true
+    readonly latencyMs: number
+    readonly kubernetes?: {
+      readonly context: string
+      readonly cluster: string
+      readonly namespace: string
+      readonly server: string
+    }
+  }
   | {
     readonly ok: false
     readonly code: ConnectionTestFailureCode
     readonly latencyMs: number
     readonly status?: number
+    readonly missingPermissions?: readonly string[]
   }
 
 export interface PortalIncident {

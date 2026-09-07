@@ -78,6 +78,7 @@
     "@deepseek-ai/dsh-webhook": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-workspace": "^0.1.2-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
+    "@kubernetes/client-node": "2.0.0",
     "zod": "4.4.3"
   },
   "peerDependencies": {

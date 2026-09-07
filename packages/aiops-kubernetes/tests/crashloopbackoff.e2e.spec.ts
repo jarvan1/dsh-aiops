@@ -1,8 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
-import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { afterEach, describe, expect, it } from 'vitest'
-import { KubectlKubernetesRuntime } from '../src/index.ts'
+import NativeKubernetesRuntime from '../src/index.ts'
 
 const namespace = process.env.AIOPS_E2E_NAMESPACE
 const pod = process.env.AIOPS_E2E_POD
@@ -17,9 +16,9 @@ afterEach(async () => {
 describe.skipIf(namespace === undefined || pod === undefined)('real read-only CrashLoopBackOff exercise', () => {
   it('reads the Pod, absolute-window Events, and bounded current/previous logs', async () => {
     ctx = new Context()
-    await ctx.plugin(LocalSubprocessRuntime)
-    const runtime = new KubectlKubernetesRuntime(ctx, {
+    const runtime = new NativeKubernetesRuntime(ctx, {
       ...(context === undefined ? {} : { context }),
+      ...(process.env.KUBECONFIG === undefined ? {} : { kubeconfig: process.env.KUBECONFIG }),
       defaultLogTailLines: 100,
       maxLogTailLines: 200,
     })

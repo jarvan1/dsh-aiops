@@ -4,7 +4,7 @@ import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   PORTAL_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
-  type ConnectionTarget,
+  type ConnectionTestRequest,
   type ConnectionTestResult,
   type PortalIncident,
   type PortalSnapshot,
@@ -58,7 +58,7 @@ function IncidentDetail({ item, t }: { item: PortalIncident; t: Props['t'] }) {
   </article>
 }
 
-export function PortalDashboard({ loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, onClose, t }: DashboardProps) {
+export function PortalDashboard({ loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, onClose, t }: DashboardProps) {
   const [snapshot, setSnapshot] = useState<PortalSnapshot | null>(null)
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -111,7 +111,7 @@ export function PortalDashboard({ loadSnapshot, testConnection, prometheusSettin
       <button className={section === 'audit' ? css.activeTab : ''} onClick={() => setSection('audit')}>{t('audit')} <span>{snapshot?.audit.length ?? 0}</span></button>
     </nav>
     {section === 'settings'
-      ? <ConnectionSettings testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} t={t}/>
+      ? <ConnectionSettings testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} kubernetesSettings={kubernetesSettings} t={t}/>
       : loading && snapshot === null
         ? <div className={css.center}><span className={css.spinner}/>{t('loading')}</div>
         : error && snapshot === null
@@ -150,12 +150,13 @@ export function PortalDashboard({ loadSnapshot, testConnection, prometheusSettin
   </main>
 }
 
-export function PortalView({ loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, t }: Props) {
+export function PortalView({ loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t }: Props) {
   return <PortalDashboard
     loadSnapshot={loadSnapshot}
     testConnection={testConnection}
     prometheusSettings={prometheusSettings}
     alertmanagerSettings={alertmanagerSettings}
+    kubernetesSettings={kubernetesSettings}
     t={t}
   />
 }
@@ -167,14 +168,13 @@ export async function fetchPortalSnapshot(signal: AbortSignal): Promise<PortalSn
 }
 
 export async function fetchPortalConnectionTest(
-  target: ConnectionTarget,
-  baseUrl: string,
+  request: ConnectionTestRequest,
   signal?: AbortSignal,
 ): Promise<ConnectionTestResult> {
   const response = await fetch(PORTAL_CONNECTION_TEST_API_PATH, {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ target, baseUrl }),
+    body: JSON.stringify(request),
     cache: 'no-store',
     ...(signal === undefined ? {} : { signal }),
   })

@@ -29,7 +29,7 @@ Twelve packages cover ingress, routing, acquisition, model interaction, a packag
 | [`aiops-http-read/`](aiops-http-read/README.md) | Shared bounded read-only HTTP acquisition | Stateless library |
 | [`aiops-alertmanager/`](aiops-alertmanager/README.md) | Read-only current-alert Service Definition and HTTP Provider | `ctx.alertmanager` |
 | [`aiops-prometheus/`](aiops-prometheus/README.md) | Read-only PromQL Service Definition and HTTP Provider | `ctx.prometheus` |
-| [`aiops-kubernetes/`](aiops-kubernetes/README.md) | Read-only Kubernetes Service Definition and kubectl Provider | `ctx.kubernetes` |
+| [`aiops-kubernetes/`](aiops-kubernetes/README.md) | Read-only native Kubernetes API Provider with optional kubectl compatibility | `ctx.kubernetes` |
 | [`tool-aiops-observe/`](tool-aiops-observe/README.md) | Seven model-facing observation tools | `ctx.tools` |
 | [`aiops-incident/`](aiops-incident/README.md) | Complete reports, append-only feedback, projections, and write tools | `aiops/incident-state`, `aiops/operator-feedback` |
 | [`tool-aiops-history/`](tool-aiops-history/README.md) | Workspace-scoped report, feedback, and routing-audit tools | `ctx.tools` over `ctx.sessionQuery` and router |

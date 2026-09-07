@@ -67,7 +67,7 @@ kind: "package-reference"
 - [AIOps 子系统](../../docs/aiops.zh.md)——从观测到事件的工作流。
 - [Alertmanager Provider](../aiops-alertmanager/README.zh.md)——当前告警过滤与 HTTP 限制。
 - [Prometheus Provider](../aiops-prometheus/README.zh.md)——查询传输与上限。
-- [Kubernetes Provider](../aiops-kubernetes/README.zh.md)——kubectl 只读约束。
+- [Kubernetes Provider](../aiops-kubernetes/README.zh.md)——原生 kubeconfig/API 读取与可选 kubectl 兼容入口。
 - [事件状态](../aiops-incident/README.zh.md)——持久证据、假设与建议。
 
 -----

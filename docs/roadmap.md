@@ -2,7 +2,7 @@
 
 English | [中文](roadmap.zh.md)
 
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 ## Completed
 
@@ -12,12 +12,15 @@ Updated: 2026-09-06
 - Stage D: `aiops/alert-routed` v2 with a canonical `startsAt` T0 and bounded replay-stable window; exact Prometheus, Kubernetes Event, and Pod-log time parameters; inclusive Event and log upper-bound filtering; an eleventh package that globally registers versioned `k8s-diag` instructions across Workspace changes; seven scenario playbooks; keyless alert-to-report Session replay; and a real read-only CrashLoopBackOff Provider exercise.
 - Stage E: append-only `aiops/operator-feedback` events and a confirm/correct/reject tool; durable per-source/fingerprint grouping and cooldown; a bounded restart-safe queue; global and severity concurrency plus model-token reservation limits; deferred, grouped, dropped, started, completed, and failed audit outcomes; and workspace-scoped feedback and routing-audit queries. Deterministic tests cover bursts, restart recovery, queue saturation, cooldown, and feedback replay.
 - Stage F: a twelfth dual-face `dsh-aiops-portal` package; a persistent sidebar entry plus native Session `AIOps` view in DSH Web; live, durable Prometheus and Alertmanager endpoint settings; a fixed same-origin read-only endpoint scoped to the router-configured workspace; incident/active/critical/review summary metrics, structured search and filters, master/detail incident inspection, operator feedback, route audit, empty/loading/error states, manual and 30-second refresh, and responsive layout. The Portal adds no database and accepts no client-supplied workspace.
+- Stage F.1: the default Kubernetes Provider now uses the official native client and kubeconfig directly, removing the host `kubectl` requirement while preserving an explicit compatibility subpath. The Portal persists a server-side kubeconfig path/context and gates saving on API identity plus Pod, Event, and Pod-log RBAC checks; kubeconfig contents and credentials never enter the browser.
 
 Stage D validation includes 17 passing test files and 108 passing tests in the default suite, plus one opt-in real-cluster test, skill-structure validation, relative documentation links, all eleven package tarballs, and isolated DSH Web profile install/config-dump/runtime-start/remove checks. The real exercise used an existing CrashLoopBackOff Pod through the product Kubernetes Provider to read the Pod, absolute-window Events, and bounded current and previous logs without mutation.
 
 Stage E validation includes 17 passing test files and 118 passing tests in the default suite, plus one opt-in real-cluster test. The complete TypeScript build, relative documentation links, bundle tarball, and tarball-content checks for all four affected packages pass.
 
 Stage F validation includes 19 passing test files and 128 passing tests in the default suite, plus one opt-in real-cluster test. The complete TypeScript build, self-contained Portal Host entry regression, global sidebar/view registration regression, live Provider settings tests, Host/Web artifacts, relative documentation links, Portal and bundle tarball-content checks, and an isolated real DSH Web startup without endpoint environment variables plus Portal API read pass.
+
+Stage F.1 validation includes a local mock Kubernetes API exercise covering kubeconfig loading, namespaced native object reads, exact absolute-time Pod logs, version probing, and three SelfSubjectAccessReviews, alongside Portal save gating and RBAC failure tests.
 
 ## Next: Stage G — evaluated RAG pilot (deferred)
 

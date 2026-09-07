@@ -3,6 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 const replacements = new Map([
   ['@deepseek-ai/dsh-aiops-http-read', '../../aiops-http-read/lib/index.js'],
   ['@deepseek-ai/dsh-aiops-incident', '../../aiops-incident/lib/index.js'],
+  ['@deepseek-ai/dsh-aiops-kubernetes', '../../aiops-kubernetes/lib/index.js'],
 ])
 
 const files = [

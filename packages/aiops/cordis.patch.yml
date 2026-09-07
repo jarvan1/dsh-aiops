@@ -109,11 +109,9 @@
     - id: aiops-kubernetes
       name: '@deepseek-ai/dsh-aiops-kubernetes'
       config:
-        command: !!js process.env.KUBECTL_COMMAND || 'kubectl'
         context: !!js process.env.KUBERNETES_CONTEXT
-        kubeconfig: !!js process.env.KUBECONFIG
-        graceMs: 5000
-        maxOutputBytes: 2000000
+        timeoutMs: 30000
+        maxResponseBytes: 2000000
         defaultLogTailLines: 200
         maxLogTailLines: 2000
 

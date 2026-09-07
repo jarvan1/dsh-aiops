@@ -2,7 +2,7 @@
 
 [English](roadmap.md) | 中文
 
-更新时间：2026-09-06
+更新时间：2026-09-07
 
 ## 已完成
 
@@ -12,12 +12,15 @@
 - 阶段 D：`aiops/alert-routed` v2 携带规范 `startsAt` T0 和有界可重放窗口；明确的 Prometheus、Kubernetes Event 与 Pod 日志时间参数；Event 和日志闭区间上界过滤；新增第十一个包，在切换 Workspace 后仍全局注册版本化 `k8s-diag` 指令；七类场景指南；无模型 key 的告警到报告 Session 重放；以及一次真实只读 CrashLoopBackOff Provider 演练。
 - 阶段 E：新增追加式 `aiops/operator-feedback` 事件和确认、修正、否定工具；按 source/fingerprint 持久分组与冷却；有界可恢复队列；全局及 severity 并发与模型 Token 预留上限；延迟、分组、丢弃、启动、完成和失败审计；以及工作区范围的反馈和路由审计查询。突发、重启恢复、队列饱和、冷却和反馈重放均有确定性测试覆盖。
 - 阶段 F：新增第十二个双面包 `dsh-aiops-portal`；在 DSH Web 注册常驻侧边栏入口和原生 Session `AIOps` 视图；提供持久化且实时生效的 Prometheus 与 Alertmanager 地址设置；用固定同源只读接口汇总 Router 配置工作区；提供事件/活跃/严重/复核概览、结构化搜索与筛选、事件主从详情、人工反馈、路由审计、空白/加载/错误状态、手动及 30 秒刷新和响应式布局。Portal 不新增数据库，也不接受客户端工作区参数。
+- 阶段 F.1：默认 Kubernetes Provider 改用官方原生客户端直接读取 kubeconfig，不再要求主机安装 `kubectl`，同时保留显式兼容子路径。Portal 持久化服务端 kubeconfig 路径/context，并以 API 身份及 Pod、Event、Pod 日志 RBAC 检查作为保存门槛；kubeconfig 内容和凭据不会进入浏览器。
 
 阶段 D 默认验证覆盖 17 个通过的测试文件和 108 个通过的测试，另有一个按需真实集群测试，并通过 skill 结构校验、相对文档链接、全部十一个 package tarball，以及隔离 DSH Web profile 的安装、配置 dump、真实启动和卸载检查。真实演练使用产品 Kubernetes Provider 读取一个现有 CrashLoopBackOff Pod、绝对窗口 Event、当前与 previous 有界日志，全程没有修改集群。
 
 阶段 E 默认验证覆盖 17 个通过的测试文件和 118 个通过的测试，另有一个按需真实集群测试；完整 TypeScript 构建、相对文档链接、bundle tarball，以及四个受影响 package 的 tarball 内容检查均通过。
 
 阶段 F 默认验证覆盖 19 个通过的测试文件和 128 个通过的测试，另有一个按需真实集群测试；完整 TypeScript 构建、Portal Host/Web 双产物、自包含 Host 入口回归、全局侧边栏/会话视图注册回归、Provider 实时设置测试、相对文档链接、Portal 与 bundle 的 tarball 内容检查，以及不提供数据源环境变量的隔离 DSH Web profile 真实启动和 Portal API 读取均通过。
+
+阶段 F.1 验证包含本地模拟 Kubernetes API 演练，覆盖 kubeconfig 加载、namespace 原生对象读取、精确绝对时间 Pod 日志、版本探测和三项 SelfSubjectAccessReview，并覆盖 Portal 保存门槛与 RBAC 失败场景。
 
 ## 下一步：阶段 G——可评测的 RAG 试点（暂缓）
 

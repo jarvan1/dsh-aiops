@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { en, NS, zh } from './locales.ts'
-import type { EndpointSettings, PortalViewInjected } from './contracts.ts'
+import type { EndpointSettings, KubernetesSettings, PortalViewInjected } from './contracts.ts'
 import { AIOpsSidebarAction } from './AIOpsSidebarAction.tsx'
 import { fetchPortalSnapshot, fetchPortalConnectionTest, PortalView } from './PortalView.tsx'
 
@@ -15,6 +15,15 @@ function endpointSettings(value: unknown): EndpointSettings | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const baseUrl = Reflect.get(value, 'baseUrl')
   return typeof baseUrl === 'string' ? { baseUrl } : undefined
+}
+
+function kubernetesSettings(value: unknown): KubernetesSettings | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const kubeconfig = Reflect.get(value, 'kubeconfig')
+  const context = Reflect.get(value, 'context')
+  if (kubeconfig !== undefined && typeof kubeconfig !== 'string') return undefined
+  if (context !== undefined && typeof context !== 'string') return undefined
+  return { kubeconfig: kubeconfig ?? '', context: context ?? '' }
 }
 
 export function apply(ctx: Context): void {
@@ -28,11 +37,16 @@ export function apply(ctx: Context): void {
     namespace: 'aiops-alertmanager',
     decode: endpointSettings,
   })
+  const kubernetesSettingsScope: SettingsScope<KubernetesSettings> = ctx.settingsScope.bind({
+    namespace: 'aiops-kubernetes',
+    decode: kubernetesSettings,
+  })
   const injectPortal = (): PortalViewInjected => ({
     loadSnapshot: fetchPortalSnapshot,
     testConnection: fetchPortalConnectionTest,
     prometheusSettings,
     alertmanagerSettings,
+    kubernetesSettings: kubernetesSettingsScope,
   })
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',

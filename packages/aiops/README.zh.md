@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-本 bundle 为现有 DSH profile 添加 Alertmanager 驱动的只读 AIOps 工作流。它挂载专用 webhook listener、带持久队列/冷却/资源预算的 fingerprint router、随包发布的 `k8s-diag` skill、三个观测 Provider、七个观测工具、报告与反馈写入工具、五个工作区范围历史/审计工具，以及 Web Portal。随附 profile 默认都不包含它。启动需要 `ALERTMANAGER_URL`、`PROMETHEUS_URL` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`；Kubernetes 读取还需要 kubectl 与只读集群凭据。
+本 bundle 为现有 DSH profile 添加 Alertmanager 驱动的只读 AIOps 工作流。它挂载专用 webhook listener、带持久队列/冷却/资源预算的 fingerprint router、随包发布的 `k8s-diag` skill、三个观测 Provider、七个观测工具、报告与反馈写入工具、五个工作区范围历史/审计工具，以及 Web Portal。随附 profile 默认都不包含它。启动需要 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`；服务端点与 kubeconfig 路径可以通过环境默认值提供，也可以在 Portal 中实时保存。Kubernetes 读取需要只读集群凭据，但不再要求 kubectl。
 
 ## 目录
 
@@ -107,6 +107,6 @@ Alertmanager webhook receiver 需要发送带 `Authorization: Bearer <secret>` �
 
 - **该层需要现有应用 profile**——它不包含 `dsh-base`、LLM Provider 或任务运行器。
 - **Listener 不提供 TLS**——保持默认 loopback 绑定并放在 TLS 反向代理之后；如果明确绑定全部接口，需要用网络策略保护。
-- **环境支持的端点属于启动配置**——更改后需要重启 profile，因为本层面向仅启动时加载的 headless 表层。
-- **只读凭据仍由部署负责**——bundle 无法证明外部 Alertmanager/Prometheus ACL 或 Kubernetes RBAC 权限。
+- **环境变量是组合默认值**——Web Portal 可以持久化并实时应用端点与 kubeconfig 选择。
+- **只读凭据仍由部署负责**——Portal 会检查 Kubernetes 所需 RBAC，但无法证明外部 Alertmanager/Prometheus ACL 策略。
 - **索引路径由单一进程拥有**——不要让另一个正在运行的 Session Query Provider 指向同一个 `aiops-incidents.sqlite` 文件。

@@ -1,5 +1,5 @@
 ---
-description: "供部署配置 DSH AIOps kubectl Provider 的只读 Kubernetes 对象、Event 与有界 Pod 日志读取。"
+description: "通过 kubeconfig 直连 Kubernetes API 的只读 Provider，并保留可选 kubectl 兼容入口。"
 kind: "package-reference"
 ---
 
@@ -9,102 +9,53 @@ kind: "package-reference"
 
 ## 概述
 
-本包让 DSH 通过已配置的 kubectl 执行环境读取 Kubernetes 对象、按时间排序的 Event 与有界非流式 Pod 日志。它提供 `ctx.kubernetes`，面向模型的工具保留在 `dsh-tool-aiops-observe`。每条命令都使用显式 argv；不暴露 shell 或任意 kubectl 参数。本包不会创建、修补、删除集群对象，不会在对象内执行命令，也不会跟随日志。
+本包提供与 Provider 无关的 `ctx.kubernetes` Service，用于读取对象、Event 和有界非流式 Pod 日志。默认的 `NativeKubernetesRuntime` 使用官方 `@kubernetes/client-node` 加载 kubeconfig 并直接调用 API Server，因此 DSH 主机不需要安装 `kubectl`。该能力不暴露变更、容器 exec、任意 URL、watch 或原始命令入口。
 
-## 目录
-
-- [使用本包](#use-this-package)
-- [理解实现](#understand-the-implementation)
-- [进一步探索](#further-exploration)
-- [开发备注](#dev-note)
-- [模型体验](#model-experience)
-- [已知限制与延期工作](#known-limitations-and-deferred-work)
-
------
-
-<a id="use-this-package"></a>
 ## 使用本包
-
-在一个 `ctx.subprocess` Provider 之后挂载本包，并为选中的 kubeconfig 授予只读 RBAC。
-
-### 最小配置
 
 ```yaml
 - name: '@deepseek-ai/dsh-aiops-kubernetes'
   config:
-    command: kubectl
+    kubeconfig: /srv/dsh/.kube/config
     context: production-readonly
+    timeoutMs: 30000
+    maxResponseBytes: 2000000
+    defaultLogTailLines: 200
+    maxLogTailLines: 2000
 ```
 
-| 字段 | 默认值 | 含义 |
-|---|---|---|
-| `command` | `kubectl` | 可执行文件路径或通过 PATH 解析的名称 |
-| `context` | kubectl 默认值 | 显式 Kubernetes context |
-| `kubeconfig` | kubectl 发现机制 | 显式 kubeconfig 路径 |
-| `graceMs` | `5000` | 进程树终止宽限时间 |
-| `maxOutputBytes` | `2000000` | 完整保留 stdout 的上限 |
-| `defaultLogTailLines` | `200` | 请求省略时使用的 Pod 日志行数 |
-| `maxLogTailLines` | `2000` | Provider 限制后的最大 Pod 日志行数 |
+省略 `kubeconfig` 和 `context` 时使用标准 kubeconfig 发现与 `current-context`。显式路径必须是绝对路径，指向 DSH 服务端机器上的文件，而不是浏览器所在机器。AIOps Portal 只把路径和 context 保存到用户设置，不会把 kubeconfig 内容或凭据发送给浏览器。
 
-上表完整列出了所有可接受字段。
+Portal 连通性测试会访问集群版本端点，并通过 `SelfSubjectAccessReview` 检查所选默认 namespace 中诊断所需的三项最低权限：读取 Pod、列出 Event、读取 `pods/log` 子资源。Kubernetes、Prometheus 和 Alertmanager 三项测试全部通过后才能保存。
 
-针对已有样本 Pod 运行按需的真实集群 CrashLoopBackOff 演练（测试为只读）：
+原生对象读取器当前明确支持诊断内置集合：Pod、Service、Endpoints、ConfigMap、PVC/PV、Node、Namespace、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job 和 CronJob。Event 与日志读取保持有界；当 Kubernetes 没有对应服务端选项时，会在本地按闭区间上界过滤。
 
-```sh
-AIOPS_E2E_NAMESPACE=diagnostics AIOPS_E2E_POD=crashloop-fixture \
-  pnpm exec vitest run packages/aiops-kubernetes/tests/crashloopbackoff.e2e.spec.ts
+### 可选 kubectl 兼容 Provider
+
+已有部署可以显式选择旧 Provider：
+
+```yaml
+- name: '@deepseek-ai/dsh-aiops-kubernetes/kubectl'
+  config:
+    command: kubectl
+    kubeconfig: /srv/dsh/.kube/config
 ```
 
------
+该子路径需要 `ctx.subprocess` 和已安装的 `kubectl`；它不再是默认入口。
 
-<a id="understand-the-implementation"></a>
-## 理解实现
-
-<details>
-<summary>实现内部机制——点击展开</summary>
-
-`KubernetesRuntime` 定义对象、列表、Event 与 Pod 日志读取。默认的 `KubectlKubernetesRuntime` 通过 `ctx.subprocess` 解析可执行文件、构造固定的 `kubectl get` 或 `kubectl logs` argv，并拒绝看起来像选项的模型输入。Event 读取接受闭区间 `sinceTime`/`untilTime`，并在取得按时间排序的 JSON 快照后按 Event 发生区间过滤。日志接受相对 `since` 或绝对 `sinceTime`；绝对 `untilTime` 会强制时间戳，并在有界读取后移除更晚或无时间戳的行。日志请求仍会在执行前解析 Provider 默认值与行数上限。stdout 有损或对象 JSON 无效时，调用会失败，不会返回不完整证据。
+## 实现导航
 
 | 文件 | 作用 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Service、kubectl Provider、argv 构造与输出校验 |
-| [`src/types.ts`](src/types.ts) | 与 Provider 无关的请求、已解析日志 spec、JSON 结果与日志文本 |
-| — | 不发布 invariant companion，因为每条命令只有一个子进程结果，不存在可独立变化并发生分歧的可变观测 |
+| [`src/runtime.ts`](src/runtime.ts) | 稳定 Service 接口、输入校验和 Event/日志窗口辅助逻辑 |
+| [`src/index.ts`](src/index.ts) | 默认原生 kubeconfig/API Provider 与 RBAC 连通性检查 |
+| [`src/kubectl.ts`](src/kubectl.ts) | 显式 kubectl 兼容 Provider |
+| [`src/types.ts`](src/types.ts) | Provider 无关请求、结果和连接能力类型 |
 
-</details>
+## 已知限制
 
------
+- 使用 `users[].user.exec` 的 kubeconfig 不需要 `kubectl`，但 DSH 主机仍须安装其中指定的认证程序，例如 `aws`、`gcloud` 或 `kubelogin`。
+- 原生 Provider 使用有界资源白名单，尚不支持任意 API discovery 或自定义资源。
+- 所有读取均为快照；日志不会 follow，Event 也不会 watch。
 
-<a id="further-exploration"></a>
-## 进一步探索
-
-- [AIOps 子系统](../../docs/aiops.zh.md)——端到端观测与事件流程。
-- [AIOps 包导航](../README.zh.md)——所有包及其职责。
-- [DSH 子进程子系统](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/subprocess.zh.md)——托管进程与输出语义。
-- [观测工具](../tool-aiops-observe/README.zh.md)——面向模型的 Consumer。
-
------
-
-<a id="dev-note"></a>
-## 开发备注
-
-无。
-
------
-
-<a id="model-experience"></a>
-## 模型体验
-
-通过 `dsh-tool-aiops-observe` 间接生效；该 Consumer 渲染有界 Kubernetes JSON、精确的有界日志文本与受控的命令失败。
-
-#### KV 缓存影响
-
-没有直接失效；上述 Consumer 负责工具 schema 与结果消息。
-
-## 已知限制与延期工作
-
-<a id="known-limitations-and-deferred-work"></a>
-
-- **kubectl 必须安装在子进程执行环境中**——如果缺失，第一次读取会在命令解析时失败。
-- **仅快照读取**——Pod 日志不会跟随，Event 读取也不会 watch 后续对象。绝对上界是在返回快照上执行，而不是 Kubernetes 服务端筛选。
-- **没有发现或聚合**——API 发现与跨 Pod/Loki 式日志搜索不属于该 Provider。
+参见 [AIOps 子系统](../../docs/aiops.zh.md)和[面向模型的观测工具](../tool-aiops-observe/README.zh.md)。

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { filterPortalIncidents } from '../src/client/model.ts'
 import { testEndpointConnection } from '../src/connectivity.ts'
-import { apply } from '../src/index.ts'
+import { apply, testPortalConnection } from '../src/index.ts'
 import { readPortalSnapshot, summarizePortal } from '../src/snapshot.ts'
 import { PORTAL_API_PATH, PORTAL_CONNECTION_TEST_API_PATH, type PortalIncident } from '../src/types.ts'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
@@ -79,6 +79,19 @@ describe('AIOps Portal read model', () => {
     await expect(testEndpointConnection('alertmanager', 'http://alertmanager:9093', undefined, alertmanagerFetch))
       .resolves.toMatchObject({ ok: true })
     expect(String(alertmanagerFetch.mock.calls[0]?.[0])).toContain('http://alertmanager:9093/api/v2/alerts?')
+  })
+
+  it('tests Kubernetes connectivity and rejects missing diagnosis RBAC', async () => {
+    const testConnection = vi.fn(async () => ({
+      context: 'prod', cluster: 'prod-cluster', namespace: 'payments', server: 'https://cluster',
+      capabilities: { pods: true, events: false, podLogs: false },
+    }))
+    await expect(testPortalConnection({ kubernetes: { testConnection } } as never, {
+      target: 'kubernetes', kubeconfig: '/srv/dsh/.kube/config', context: 'prod',
+    }, new AbortController().signal)).resolves.toMatchObject({
+      ok: false, code: 'rbac_denied', missingPermissions: ['events', 'podLogs'],
+    })
+    expect(testConnection).toHaveBeenCalledWith({ kubeconfig: '/srv/dsh/.kube/config', context: 'prod' }, expect.any(AbortSignal))
   })
 
   it('rejects invalid URLs, HTTP failures, and responses from the wrong service', async () => {

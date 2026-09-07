@@ -16,7 +16,7 @@ function OpsIcon() {
 }
 
 export function AIOpsSidebarAction({
-  wide, loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, t,
+  wide, loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t,
 }: Props) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -58,6 +58,7 @@ export function AIOpsSidebarAction({
           testConnection={testConnection}
           prometheusSettings={prometheusSettings}
           alertmanagerSettings={alertmanagerSettings}
+          kubernetesSettings={kubernetesSettings}
           onClose={() => setOpen(false)}
           t={t}
         />

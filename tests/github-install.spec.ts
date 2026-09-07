@@ -10,11 +10,13 @@ describe('GitHub source installation', () => {
       name?: string
       dsh?: { bundle?: { patch?: string } }
       scripts?: { prepare?: string }
+      dependencies?: Record<string, string>
     }
 
     expect(manifest.name).toBe('dsh-aiops')
     expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
     expect(manifest.scripts?.prepare).toBe('pnpm run build:github')
+    expect(manifest.dependencies?.['@kubernetes/client-node']).toBe('2.0.0')
   })
 
   it('uses repository-relative plugin artifacts that are all buildable', async () => {
@@ -23,6 +25,7 @@ describe('GitHub source installation', () => {
       .map(match => match[1])
 
     expect(entries).toHaveLength(10)
+    expect(patch).not.toContain('KUBECTL_COMMAND')
     for (const entry of entries) await expect(access(resolve(root, entry!))).resolves.toBeUndefined()
   })
 })

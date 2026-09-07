@@ -4,9 +4,9 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /** Shared execution fields for one Kubernetes read. */
 export interface KubernetesExecutionTarget {
-  /** Working directory used for kubectl execution and relative kubeconfig resolution. */
+  /** Owning diagnostic working directory; retained across interchangeable Providers. */
   readonly cwd: string
-  /** Optional namespace; omission uses the selected kubectl context default. */
+  /** Optional namespace; omission uses the selected context namespace or `default`. */
   readonly namespace?: string
 }
 
@@ -46,7 +46,7 @@ export interface KubernetesEventsRequest extends KubernetesExecutionTarget {
 export interface KubernetesLogsRequest extends KubernetesExecutionTarget {
   /** Exact Pod name. */
   readonly pod: string
-  /** Container name; omission lets kubectl select the Pod's only/default container. */
+  /** Container name; omission lets Kubernetes select the Pod's only/default container. */
   readonly container?: string
   /** Read the previous terminated container instance. */
   readonly previous?: boolean
@@ -56,7 +56,7 @@ export interface KubernetesLogsRequest extends KubernetesExecutionTarget {
   readonly since?: string
   /** Absolute RFC3339 lower bound; mutually exclusive with `since`. */
   readonly sinceTime?: string
-  /** Absolute RFC3339 upper bound applied after kubectl returns timestamped lines. */
+  /** Absolute RFC3339 upper bound applied after the Provider returns timestamped lines. */
   readonly untilTime?: string
   /** Include the Kubernetes timestamp prefix on each line. */
   readonly timestamps?: boolean
@@ -85,5 +85,26 @@ export interface KubernetesLogsSpec extends KubernetesExecutionTarget {
 /** Lossless JSON returned by the Kubernetes API through the selected provider. */
 export type KubernetesReadResult = JsonValue
 
-/** Exact bounded stdout returned by `kubectl logs`. */
+/** Exact bounded Pod-log text returned by the selected Provider. */
 export type KubernetesLogsResult = string
+
+export interface KubernetesConnectionSpec {
+  /** Absolute server-side path. Empty or omitted uses normal kubeconfig discovery. */
+  readonly kubeconfig?: string
+  /** Empty or omitted uses the kubeconfig current context. */
+  readonly context?: string
+}
+
+export interface KubernetesReadCapabilities {
+  readonly pods: boolean
+  readonly events: boolean
+  readonly podLogs: boolean
+}
+
+export interface KubernetesConnectionResult {
+  readonly context: string
+  readonly cluster: string
+  readonly namespace: string
+  readonly server: string
+  readonly capabilities: KubernetesReadCapabilities
+}

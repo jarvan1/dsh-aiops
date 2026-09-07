@@ -52,9 +52,9 @@ pnpm run pack:bundle
 DSH_HOME=/path/to/profile-home pnpm dsh plugin --profile web add link:/path/to/dsh-aiops/packages/aiops
 ```
 
-GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可以从 registry 安装 `@deepseek-ai/dsh-aiops`。两种形式都会把 AIOps patch 添加到 profile 的 base 与应用层之后。`PROMETHEUS_URL` 和 `ALERTMANAGER_URL` 是可选的组合层默认值，也可以在 AIOps 数据源设置中实时保存或覆盖；`AIOPS_WORKSPACE` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` 凭据用于配置自动化工作流。Webhook listener 默认位于 `127.0.0.1:3081/alertmanager`；Kubernetes 使用配置的 `kubectl` 命令和部署侧只读凭据。
+GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可以从 registry 安装 `@deepseek-ai/dsh-aiops`。两种形式都会把 AIOps patch 添加到 profile 的 base 与应用层之后。`PROMETHEUS_URL`、`ALERTMANAGER_URL`、`KUBECONFIG` 和 `KUBERNETES_CONTEXT` 是可选的组合层默认值，也可以在 AIOps 数据源设置中实时保存或覆盖；`AIOPS_WORKSPACE` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` 凭据用于配置自动化工作流。Webhook listener 默认位于 `127.0.0.1:3081/alertmanager`；Kubernetes 使用官方 Node 客户端和部署侧只读 kubeconfig 凭据，不要求安装 `kubectl`。
 
-在 Web profile 中，左侧栏底部始终显示 `AIOps` 入口，可以从任意页面打开全局 Portal；非空 Session 中仍保留 `AIOps` 会话标签。Portal 固定读取 `AIOPS_WORKSPACE`，不会以当前聊天 Session 的工作区扩大查询范围。在 Portal 中保存的 Prometheus 与 Alertmanager URL 会写入 DSH 用户设置并立即生效。
+在 Web profile 中，左侧栏底部始终显示 `AIOps` 入口，可以从任意页面打开全局 Portal；非空 Session 中仍保留 `AIOps` 会话标签。Portal 固定读取 `AIOPS_WORKSPACE`，不会以当前聊天 Session 的工作区扩大查询范围。Prometheus/Alertmanager URL 以及服务端 kubeconfig 路径/context 会写入 DSH 用户设置并立即生效。三个数据源都必须通过连通性测试，Kubernetes 还会验证最低只读 RBAC 权限。
 
 Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，已完成与后续阶段见 [路线图](docs/roadmap.zh.md)。
 

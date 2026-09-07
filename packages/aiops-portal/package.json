@@ -42,6 +42,7 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-aiops-http-read": "workspace:^",
+    "@deepseek-ai/dsh-aiops-kubernetes": "workspace:^",
     "@deepseek-ai/schemastery": "^3.18.2"
   },
   "peerDependencies": {

@@ -18,7 +18,7 @@ Alertmanager POST /alertmanager
                               |
 alertmanager_alerts -> ctx.alertmanager -> Alertmanager HTTP API v2
 prometheus_query*   -> ctx.prometheus   -> Prometheus HTTP API
-kubernetes_*        -> ctx.kubernetes   -> ctx.subprocess -> kubectl -> Kubernetes API
+kubernetes_*        -> ctx.kubernetes   -> native kubeconfig client -> Kubernetes API
              evidence + hypotheses + recommendations
                               |
                  aiops_incident_report
@@ -57,7 +57,7 @@ The first firing creates round 1; repeated firing and resolved notifications app
 | Alert delivery | [`dsh-webhook-alertmanager`](../packages/webhook-alertmanager/README.md), isolated HTTP listener, `ctx.webhookRuntime` | [`dsh-aiops-incident-router`](../packages/incident-router/README.md), `ctx.aiopsIncidentRouter` |
 | Alertmanager alerts | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.md), `ctx.alertmanager`, HTTP API v2 | `alertmanager_alerts` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Prometheus query | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.md), `ctx.prometheus`, HTTP query API | `prometheus_query`, `prometheus_query_range` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
-| Kubernetes read | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.md), `ctx.kubernetes`, kubectl over `ctx.subprocess` | `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, `kubernetes_logs` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
+| Kubernetes read | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.md), `ctx.kubernetes`, official native API client (optional kubectl compatibility subpath) | `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, `kubernetes_logs` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Diagnostic workflow | Packaged [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.md), registered globally | `k8s-diag` loaded by each routed diagnostic Session |
 | Operations Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.md), fixed same-origin `/api/aiops/portal` | Persistent DSH Web sidebar action, Session view, and live data-source settings |
 
@@ -163,9 +163,12 @@ abstract resolveLogs(request: KubernetesLogsRequest): KubernetesLogsSpec
  * Read one bounded non-streaming Pod-log snapshot.
  * @param spec - fully resolved request from {@link resolveLogs}.
  * @param signal - caller cancellation.
- * @returns exact kubectl stdout within the configured byte limit.
+ * @returns bounded Pod log text from the selected Provider.
  */
 abstract logs(spec: KubernetesLogsSpec, signal?: AbortSignal): Promise<KubernetesLogsResult>
+
+/** Validate kubeconfig/API connectivity and the diagnosis read permissions. */
+abstract testConnection(spec: KubernetesConnectionSpec, signal?: AbortSignal): Promise<KubernetesConnectionResult>
 ```
 
 Source: [`packages/aiops-kubernetes/src/index.ts`](../packages/aiops-kubernetes/src/index.ts)

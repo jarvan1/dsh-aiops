@@ -18,7 +18,7 @@ Alertmanager POST /alertmanager
                               |
 alertmanager_alerts -> ctx.alertmanager -> Alertmanager HTTP API v2
 prometheus_query*   -> ctx.prometheus   -> Prometheus HTTP API
-kubernetes_*        -> ctx.kubernetes   -> ctx.subprocess -> kubectl -> Kubernetes API
+kubernetes_*        -> ctx.kubernetes   -> 原生 kubeconfig 客户端 -> Kubernetes API
              evidence + hypotheses + recommendations
                               |
                  aiops_incident_report
@@ -57,7 +57,7 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 | 告警投递 | [`dsh-webhook-alertmanager`](../packages/webhook-alertmanager/README.zh.md)、隔离 HTTP listener、`ctx.webhookRuntime` | [`dsh-aiops-incident-router`](../packages/incident-router/README.zh.md)、`ctx.aiopsIncidentRouter` |
 | Alertmanager 告警 | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.zh.md)、`ctx.alertmanager`、HTTP API v2 | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `alertmanager_alerts` |
 | Prometheus 查询 | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.zh.md)、`ctx.prometheus`、HTTP 查询 API | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `prometheus_query`、`prometheus_query_range` |
-| Kubernetes 读取 | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.zh.md)、`ctx.kubernetes`、通过 `ctx.subprocess` 运行 kubectl | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `kubernetes_get`、`kubernetes_list`、`kubernetes_events`、`kubernetes_logs` |
+| Kubernetes 读取 | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.zh.md)、`ctx.kubernetes`、官方原生 API 客户端（另有可选 kubectl 兼容子路径） | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `kubernetes_get`、`kubernetes_list`、`kubernetes_events`、`kubernetes_logs` |
 | 诊断流程 | 全局注册的随包 [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.zh.md) | 每个被路由诊断 Session 加载的 `k8s-diag` |
 | 运维 Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.zh.md)、固定同源 `/api/aiops/portal` | DSH Web 常驻侧边栏入口、Session 视图与实时数据源设置 |
 
@@ -163,9 +163,12 @@ abstract resolveLogs(request: KubernetesLogsRequest): KubernetesLogsSpec
  * Read one bounded non-streaming Pod-log snapshot.
  * @param spec - fully resolved request from {@link resolveLogs}.
  * @param signal - caller cancellation.
- * @returns exact kubectl stdout within the configured byte limit.
+ * @returns selected Provider 返回的有界 Pod 日志文本。
  */
 abstract logs(spec: KubernetesLogsSpec, signal?: AbortSignal): Promise<KubernetesLogsResult>
+
+/** 验证 kubeconfig/API 连通性与诊断所需只读权限。 */
+abstract testConnection(spec: KubernetesConnectionSpec, signal?: AbortSignal): Promise<KubernetesConnectionResult>
 ```
 
 Source: [`packages/aiops-kubernetes/src/index.ts`](../packages/aiops-kubernetes/src/index.ts)

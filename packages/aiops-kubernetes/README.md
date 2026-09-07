@@ -1,5 +1,5 @@
 ---
-description: "Read-only Kubernetes object, Event, and bounded Pod-log retrieval for deployments configuring the DSH AIOps kubectl Provider."
+description: "Read-only native Kubernetes API access from kubeconfig, with an optional kubectl compatibility provider."
 kind: "package-reference"
 ---
 
@@ -9,102 +9,53 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package lets DSH read Kubernetes objects, chronological Events, and bounded non-streaming Pod logs through a configured kubectl execution world. It supplies `ctx.kubernetes` while the model-facing tools stay in `dsh-tool-aiops-observe`. Every command uses an explicit argv; no shell or arbitrary kubectl arguments are exposed. The package never creates, patches, deletes, executes in, or follows logs from cluster objects.
+This package supplies the provider-neutral `ctx.kubernetes` service for object, Event, and bounded non-streaming Pod-log reads. Its default `NativeKubernetesRuntime` uses the official `@kubernetes/client-node` library to load kubeconfig and call the API server directly, so the DSH host does not need `kubectl`. The capability exposes no mutation, exec, arbitrary URL, watch, or raw-command path.
 
-## Table of Contents
-
-- [Use this package](#use-this-package)
-- [Understand the implementation](#understand-the-implementation)
-- [Further Exploration](#further-exploration)
-- [Dev Note](#dev-note)
-- [Model Experience](#model-experience)
-- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
-
------
-
-<a id="use-this-package"></a>
 ## Use this package
-
-Mount it after one `ctx.subprocess` provider; grant the selected kubeconfig read-only RBAC.
-
-### Minimal configuration
 
 ```yaml
 - name: '@deepseek-ai/dsh-aiops-kubernetes'
   config:
-    command: kubectl
+    kubeconfig: /srv/dsh/.kube/config
     context: production-readonly
+    timeoutMs: 30000
+    maxResponseBytes: 2000000
+    defaultLogTailLines: 200
+    maxLogTailLines: 2000
 ```
 
-| Field | Default | Meaning |
-|---|---|---|
-| `command` | `kubectl` | Executable path or PATH-resolved name |
-| `context` | kubectl default | Explicit Kubernetes context |
-| `kubeconfig` | kubectl discovery | Explicit kubeconfig path |
-| `graceMs` | `5000` | Process-tree termination grace |
-| `maxOutputBytes` | `2000000` | Complete retained stdout cap |
-| `defaultLogTailLines` | `200` | Pod-log line count when a request omits it |
-| `maxLogTailLines` | `2000` | Maximum Pod-log line count after Provider capping |
+`kubeconfig` and `context` may be omitted to use normal kubeconfig discovery and `current-context`. A configured path must be absolute and refers to a file on the DSH server, not the browser machine. The AIOps Portal stores only this path and context in user settings; it never sends kubeconfig contents or credentials to the browser.
 
-The table above is the exhaustive list of accepted fields.
+The Portal connection test calls the cluster version endpoint and uses `SelfSubjectAccessReview` to verify the three minimum diagnosis capabilities in the selected default namespace: get Pods, list Events, and get the `pods/log` subresource. Saving is enabled only after this check and the Prometheus/Alertmanager checks pass.
 
-Run the opt-in real-cluster CrashLoopBackOff exercise against an existing fixture Pod (the test is read-only):
+The native object reader intentionally supports the built-in diagnosis set: Pods, Services, Endpoints, ConfigMaps, PVCs/PVs, Nodes, Namespaces, Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, and CronJobs. Event and log windows remain bounded and are post-filtered at an inclusive upper bound when Kubernetes has no matching server-side option.
 
-```sh
-AIOPS_E2E_NAMESPACE=diagnostics AIOPS_E2E_POD=crashloop-fixture \
-  pnpm exec vitest run packages/aiops-kubernetes/tests/crashloopbackoff.e2e.spec.ts
+### Optional kubectl compatibility provider
+
+Existing deployments can explicitly select the legacy provider:
+
+```yaml
+- name: '@deepseek-ai/dsh-aiops-kubernetes/kubectl'
+  config:
+    command: kubectl
+    kubeconfig: /srv/dsh/.kube/config
 ```
 
------
+That subpath requires `ctx.subprocess` and an installed `kubectl`; it is no longer the package default.
 
-<a id="understand-the-implementation"></a>
-## Understand the implementation
-
-<details>
-<summary>Implementation internals — click to expand</summary>
-
-`KubernetesRuntime` defines object, list, Event, and Pod-log reads. The default `KubectlKubernetesRuntime` resolves the executable through `ctx.subprocess`, constructs fixed `kubectl get` or `kubectl logs` argv, and rejects option-looking model values. Event reads accept inclusive `sinceTime`/`untilTime` bounds and filter Event occurrence intervals after the chronological JSON snapshot. Logs accept either relative `since` or absolute `sinceTime`; an absolute `untilTime` forces timestamps and removes later or undated lines after the bounded read. Log requests still resolve a Provider default and line cap before execution. Lossy stdout or invalid object JSON fails the call instead of returning incomplete evidence.
+## Implementation map
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Service, kubectl provider, argv construction, and output validation |
-| [`src/types.ts`](src/types.ts) | Provider-neutral requests, resolved log spec, JSON results, and log text |
-| — | No invariant companion is published because each command has one subprocess outcome and no independent mutable observation can diverge |
+| [`src/runtime.ts`](src/runtime.ts) | Stable service seam, validation, and Event/log window helpers |
+| [`src/index.ts`](src/index.ts) | Default native kubeconfig/API provider and RBAC connectivity check |
+| [`src/kubectl.ts`](src/kubectl.ts) | Explicit kubectl compatibility provider |
+| [`src/types.ts`](src/types.ts) | Provider-neutral requests, results, and connection capability types |
 
-</details>
+## Known limitations
 
------
+- Kubeconfigs using `users[].user.exec` do not require `kubectl`, but still require their configured authentication executable (for example `aws`, `gcloud`, or `kubelogin`) on the DSH host.
+- The native provider uses a bounded allowlist rather than arbitrary API discovery or custom resources.
+- Reads are snapshots; logs do not follow and Events are not watched.
 
-<a id="further-exploration"></a>
-## Further Exploration
-
-- [AIOps subsystem](../../docs/aiops.md) — end-to-end observation and incident flow.
-- [AIOps package map](../README.md) — all packages and their roles.
-- [DSH subprocess subsystem](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/subsystems/subprocess.md) — managed process and output semantics.
-- [Observation tools](../tool-aiops-observe/README.md) — the model-facing Consumer.
-
------
-
-<a id="dev-note"></a>
-## Dev Note
-
-None.
-
------
-
-<a id="model-experience"></a>
-## Model Experience
-
-Indirectly, through `dsh-tool-aiops-observe`, which renders bounded Kubernetes JSON, exact bounded log text, and contained command failures.
-
-#### KV Cache effect
-
-No direct invalidation; the named Consumer owns tool schemas and result messages.
-
-## Known Limitations and Deferred Work
-
-<a id="known-limitations-and-deferred-work"></a>
-
-- **kubectl must be installed in the subprocess execution world** — command resolution fails at the first read when it is absent.
-- **Snapshot reads only** — Pod logs never follow, and Event reads do not watch for later objects. Absolute upper bounds are enforced on the returned snapshot, not by Kubernetes server-side selection.
-- **No discovery or aggregation** — API discovery and multi-Pod/Loki-style log searches remain outside this Provider.
+See the [AIOps subsystem](../../docs/aiops.md) and [model-facing observation tools](../tool-aiops-observe/README.md).

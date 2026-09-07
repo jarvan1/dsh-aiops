@@ -29,7 +29,7 @@ kind: "package-group"
 | [`aiops-http-read/`](aiops-http-read/README.zh.md) | 共享的有界只读 HTTP 采集 | 无状态库 |
 | [`aiops-alertmanager/`](aiops-alertmanager/README.zh.md) | 只读当前告警 Service Definition 与 HTTP Provider | `ctx.alertmanager` |
 | [`aiops-prometheus/`](aiops-prometheus/README.zh.md) | 只读 PromQL Service Definition 与 HTTP Provider | `ctx.prometheus` |
-| [`aiops-kubernetes/`](aiops-kubernetes/README.zh.md) | 只读 Kubernetes Service Definition 与 kubectl Provider | `ctx.kubernetes` |
+| [`aiops-kubernetes/`](aiops-kubernetes/README.zh.md) | 默认直连 Kubernetes API、可选 kubectl 兼容的只读 Provider | `ctx.kubernetes` |
 | [`tool-aiops-observe/`](tool-aiops-observe/README.zh.md) | 七个面向模型的观测工具 | `ctx.tools` |
 | [`aiops-incident/`](aiops-incident/README.zh.md) | 完整报告、追加式反馈、投影与写入工具 | `aiops/incident-state`、`aiops/operator-feedback` |
 | [`tool-aiops-history/`](tool-aiops-history/README.zh.md) | 工作区范围的报告、反馈与路由审计工具 | 基于 `ctx.sessionQuery` 与 router 的 `ctx.tools` |

@@ -67,7 +67,7 @@ Each tool translates snake-case model arguments to one provider-neutral Service 
 - [AIOps subsystem](../../docs/aiops.md) — observation-to-incident workflow.
 - [Alertmanager Provider](../aiops-alertmanager/README.md) — current-alert filters and HTTP limits.
 - [Prometheus provider](../aiops-prometheus/README.md) — query transport and bounds.
-- [Kubernetes provider](../aiops-kubernetes/README.md) — kubectl read enforcement.
+- [Kubernetes provider](../aiops-kubernetes/README.md) — native kubeconfig/API reads and optional kubectl compatibility.
 - [Incident state](../aiops-incident/README.md) — durable evidence, hypotheses, and recommendations.
 
 -----
