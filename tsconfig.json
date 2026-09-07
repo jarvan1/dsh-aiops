@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/aiops-http-read" },
+    { "path": "packages/aiops-alertmanager" },
+    { "path": "packages/aiops-prometheus" },
+    { "path": "packages/aiops-kubernetes" },
+    { "path": "packages/aiops-incident" },
+    { "path": "packages/tool-aiops-observe" },
+    { "path": "packages/tool-aiops-history" },
+    { "path": "packages/aiops-portal" },
+    { "path": "packages/aiops" }
+  ]
+}

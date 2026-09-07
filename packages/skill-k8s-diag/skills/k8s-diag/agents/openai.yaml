@@ -1,0 +1,3 @@
+interface:
+  display_name: "Kubernetes Alert Diagnosis"
+  short_description: "Read-only, time-anchored Kubernetes incident diagnosis"

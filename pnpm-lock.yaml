@@ -1,0 +1,461 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+overrides:
+  '@deepseek-ai/cordis': link:../deepseek-harness/vendor/cordis
+  '@deepseek-ai/cordis-plugin-include': link:../deepseek-harness/vendor/include
+  '@deepseek-ai/cordis-plugin-loader': link:../deepseek-harness/vendor/loader
+  '@deepseek-ai/dsh-agent': link:../deepseek-harness/packages/core/agent
+  '@deepseek-ai/dsh-agent-default-model': link:../deepseek-harness/packages/core/agent-default-model
+  '@deepseek-ai/dsh-agent-presets': link:../deepseek-harness/packages/preset/agent-presets
+  '@deepseek-ai/dsh-brand': link:../deepseek-harness/packages/util/brand
+  '@deepseek-ai/dsh-client-locale': link:../deepseek-harness/packages/client/locale
+  '@deepseek-ai/dsh-client-ui-conversation': link:../deepseek-harness/packages/client/ui-conversation
+  '@deepseek-ai/dsh-client-ui-renderer': link:../deepseek-harness/packages/client/ui-renderer
+  '@deepseek-ai/dsh-client-ui-settings': link:../deepseek-harness/packages/client/ui-settings
+  '@deepseek-ai/dsh-client-ui-sidebar': link:../deepseek-harness/packages/client/ui-sidebar
+  '@deepseek-ai/dsh-client-ui-slots': link:../deepseek-harness/packages/client/ui-slots
+  '@deepseek-ai/dsh-credentials': link:../deepseek-harness/packages/credentials/credentials
+  '@deepseek-ai/dsh-host-webserver': link:../deepseek-harness/packages/host/webserver
+  '@deepseek-ai/dsh-llm': link:../deepseek-harness/packages/llm/llm
+  '@deepseek-ai/dsh-permission-presets': link:../deepseek-harness/packages/interaction/permission-presets
+  '@deepseek-ai/dsh-session': link:../deepseek-harness/packages/core/session
+  '@deepseek-ai/dsh-session-persistence': link:../deepseek-harness/packages/session/session-persistence
+  '@deepseek-ai/dsh-session-persistence-jsonl': link:../deepseek-harness/packages/session/session-persistence-jsonl
+  '@deepseek-ai/dsh-session-projection': link:../deepseek-harness/packages/session/session-projection
+  '@deepseek-ai/dsh-session-query': link:../deepseek-harness/packages/session-query/session-query
+  '@deepseek-ai/dsh-session-query-sqlite': link:../deepseek-harness/packages/session-query/session-query-sqlite
+  '@deepseek-ai/dsh-session-title': link:../deepseek-harness/packages/session/session-title
+  '@deepseek-ai/dsh-settings': link:../deepseek-harness/packages/settings/settings
+  '@deepseek-ai/dsh-skill': link:../deepseek-harness/packages/skill/skill
+  '@deepseek-ai/dsh-subprocess': link:../deepseek-harness/packages/subprocess/subprocess
+  '@deepseek-ai/dsh-subprocess-local': link:../deepseek-harness/packages/subprocess/subprocess-local
+  '@deepseek-ai/dsh-system-prompt': link:../deepseek-harness/packages/core/system-prompt
+  '@deepseek-ai/dsh-timeout': link:../deepseek-harness/packages/util/timeout
+  '@deepseek-ai/dsh-tools': link:../deepseek-harness/packages/core/tools
+  '@deepseek-ai/dsh-util-values': link:../deepseek-harness/packages/util/values
+  '@deepseek-ai/dsh-webhook': link:../deepseek-harness/packages/webhook/webhook
+  '@deepseek-ai/dsh-workspace': link:../deepseek-harness/packages/workspace/workspace
+  '@deepseek-ai/schemastery': link:../deepseek-harness/vendor/schemastery
+  '@types/react': link:../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react
+  '@types/react-dom': link:../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react-dom
+  react: link:../deepseek-harness/packages/client/ui-trajectory/node_modules/react
+  react-dom: link:../deepseek-harness/packages/client/ui-trajectory/node_modules/react-dom
+  tsdown: link:../deepseek-harness/node_modules/.pnpm/tsdown@0.22.2_oxc-resolver@11.20.0_publint@0.3.21_tsx@4.22.4_typescript@6.0.3/node_modules/tsdown
+  zod: link:../deepseek-harness/packages/llm/llm/node_modules/zod
+
+importers:
+
+  .:
+    devDependencies:
+      '@types/node':
+        specifier: link:../deepseek-harness/node_modules/@types/node
+        version: link:../deepseek-harness/node_modules/@types/node
+      typescript:
+        specifier: link:../deepseek-harness/node_modules/typescript
+        version: link:../deepseek-harness/node_modules/typescript
+      vitest:
+        specifier: link:../deepseek-harness/node_modules/vitest
+        version: link:../deepseek-harness/node_modules/vitest
+
+  packages/aiops:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-aiops-alertmanager':
+        specifier: workspace:^
+        version: link:../aiops-alertmanager
+      '@deepseek-ai/dsh-aiops-incident':
+        specifier: workspace:^
+        version: link:../aiops-incident
+      '@deepseek-ai/dsh-aiops-incident-router':
+        specifier: workspace:^
+        version: link:../incident-router
+      '@deepseek-ai/dsh-aiops-kubernetes':
+        specifier: workspace:^
+        version: link:../aiops-kubernetes
+      '@deepseek-ai/dsh-aiops-portal':
+        specifier: workspace:^
+        version: link:../aiops-portal
+      '@deepseek-ai/dsh-aiops-prometheus':
+        specifier: workspace:^
+        version: link:../aiops-prometheus
+      '@deepseek-ai/dsh-aiops-skill-k8s-diag':
+        specifier: workspace:^
+        version: link:../skill-k8s-diag
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: link:../../../deepseek-harness/packages/host/webserver
+        version: link:../../../deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-session-query-sqlite':
+        specifier: link:../../../deepseek-harness/packages/session-query/session-query-sqlite
+        version: link:../../../deepseek-harness/packages/session-query/session-query-sqlite
+      '@deepseek-ai/dsh-skill':
+        specifier: link:../../../deepseek-harness/packages/skill/skill
+        version: link:../../../deepseek-harness/packages/skill/skill
+      '@deepseek-ai/dsh-tool-aiops-history':
+        specifier: workspace:^
+        version: link:../tool-aiops-history
+      '@deepseek-ai/dsh-tool-aiops-observe':
+        specifier: workspace:^
+        version: link:../tool-aiops-observe
+      '@deepseek-ai/dsh-webhook':
+        specifier: link:../../../deepseek-harness/packages/webhook/webhook
+        version: link:../../../deepseek-harness/packages/webhook/webhook
+      '@deepseek-ai/dsh-webhook-alertmanager':
+        specifier: workspace:^
+        version: link:../webhook-alertmanager
+
+  packages/aiops-alertmanager:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-aiops-http-read':
+        specifier: workspace:^
+        version: link:../aiops-http-read
+      '@deepseek-ai/dsh-settings':
+        specifier: link:../../../deepseek-harness/packages/settings/settings
+        version: link:../../../deepseek-harness/packages/settings/settings
+      '@deepseek-ai/dsh-timeout':
+        specifier: link:../../../deepseek-harness/packages/util/timeout
+        version: link:../../../deepseek-harness/packages/util/timeout
+      '@deepseek-ai/dsh-util-values':
+        specifier: link:../../../deepseek-harness/packages/util/values
+        version: link:../../../deepseek-harness/packages/util/values
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
+
+  packages/aiops-http-read:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-timeout':
+        specifier: link:../../../deepseek-harness/packages/util/timeout
+        version: link:../../../deepseek-harness/packages/util/timeout
+
+  packages/aiops-incident:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-brand':
+        specifier: link:../../../deepseek-harness/packages/util/brand
+        version: link:../../../deepseek-harness/packages/util/brand
+      '@deepseek-ai/dsh-session':
+        specifier: link:../../../deepseek-harness/packages/core/session
+        version: link:../../../deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-session-persistence':
+        specifier: link:../../../deepseek-harness/packages/session/session-persistence
+        version: link:../../../deepseek-harness/packages/session/session-persistence
+      '@deepseek-ai/dsh-session-projection':
+        specifier: link:../../../deepseek-harness/packages/session/session-projection
+        version: link:../../../deepseek-harness/packages/session/session-projection
+      '@deepseek-ai/dsh-session-query':
+        specifier: link:../../../deepseek-harness/packages/session-query/session-query
+        version: link:../../../deepseek-harness/packages/session-query/session-query
+      '@deepseek-ai/dsh-tools':
+        specifier: link:../../../deepseek-harness/packages/core/tools
+        version: link:../../../deepseek-harness/packages/core/tools
+      zod:
+        specifier: link:../../../deepseek-harness/packages/llm/llm/node_modules/zod
+        version: link:../../../deepseek-harness/packages/llm/llm/node_modules/zod
+    devDependencies:
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: link:../../../deepseek-harness/vendor/include
+        version: link:../../../deepseek-harness/vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: link:../../../deepseek-harness/vendor/loader
+        version: link:../../../deepseek-harness/vendor/loader
+      '@deepseek-ai/dsh-agent':
+        specifier: link:../../../deepseek-harness/packages/core/agent
+        version: link:../../../deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-llm':
+        specifier: link:../../../deepseek-harness/packages/llm/llm
+        version: link:../../../deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: link:../../../deepseek-harness/packages/session/session-persistence-jsonl
+        version: link:../../../deepseek-harness/packages/session/session-persistence-jsonl
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: link:../../../deepseek-harness/packages/core/system-prompt
+        version: link:../../../deepseek-harness/packages/core/system-prompt
+
+  packages/aiops-kubernetes:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-subprocess':
+        specifier: link:../../../deepseek-harness/packages/subprocess/subprocess
+        version: link:../../../deepseek-harness/packages/subprocess/subprocess
+      '@deepseek-ai/dsh-util-values':
+        specifier: link:../../../deepseek-harness/packages/util/values
+        version: link:../../../deepseek-harness/packages/util/values
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/dsh-subprocess-local':
+        specifier: link:../../../deepseek-harness/packages/subprocess/subprocess-local
+        version: link:../../../deepseek-harness/packages/subprocess/subprocess-local
+
+  packages/aiops-portal:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-aiops-http-read':
+        specifier: workspace:^
+        version: link:../aiops-http-read
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: link:../../../deepseek-harness/packages/host/webserver
+        version: link:../../../deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-session-query':
+        specifier: link:../../../deepseek-harness/packages/session-query/session-query
+        version: link:../../../deepseek-harness/packages/session-query/session-query
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/dsh-aiops-incident':
+        specifier: workspace:^
+        version: link:../aiops-incident
+      '@deepseek-ai/dsh-aiops-incident-router':
+        specifier: workspace:^
+        version: link:../incident-router
+      '@deepseek-ai/dsh-client-locale':
+        specifier: link:../../../deepseek-harness/packages/client/locale
+        version: link:../../../deepseek-harness/packages/client/locale
+      '@deepseek-ai/dsh-client-ui-conversation':
+        specifier: link:../../../deepseek-harness/packages/client/ui-conversation
+        version: link:../../../deepseek-harness/packages/client/ui-conversation
+      '@deepseek-ai/dsh-client-ui-renderer':
+        specifier: link:../../../deepseek-harness/packages/client/ui-renderer
+        version: link:../../../deepseek-harness/packages/client/ui-renderer
+      '@deepseek-ai/dsh-client-ui-settings':
+        specifier: link:../../../deepseek-harness/packages/client/ui-settings
+        version: link:../../../deepseek-harness/packages/client/ui-settings
+      '@deepseek-ai/dsh-client-ui-sidebar':
+        specifier: link:../../../deepseek-harness/packages/client/ui-sidebar
+        version: link:../../../deepseek-harness/packages/client/ui-sidebar
+      '@deepseek-ai/dsh-client-ui-slots':
+        specifier: link:../../../deepseek-harness/packages/client/ui-slots
+        version: link:../../../deepseek-harness/packages/client/ui-slots
+      '@deepseek-ai/dsh-session':
+        specifier: link:../../../deepseek-harness/packages/core/session
+        version: link:../../../deepseek-harness/packages/core/session
+      '@types/react':
+        specifier: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react
+        version: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react
+      '@types/react-dom':
+        specifier: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react-dom
+        version: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react-dom
+      react:
+        specifier: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/react
+        version: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/react
+      react-dom:
+        specifier: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/react-dom
+        version: link:../../../deepseek-harness/packages/client/ui-trajectory/node_modules/react-dom
+      tsdown:
+        specifier: link:../../../deepseek-harness/node_modules/.pnpm/tsdown@0.22.2_oxc-resolver@11.20.0_publint@0.3.21_tsx@4.22.4_typescript@6.0.3/node_modules/tsdown
+        version: link:../../../deepseek-harness/node_modules/.pnpm/tsdown@0.22.2_oxc-resolver@11.20.0_publint@0.3.21_tsx@4.22.4_typescript@6.0.3/node_modules/tsdown
+
+  packages/aiops-prometheus:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-aiops-http-read':
+        specifier: workspace:^
+        version: link:../aiops-http-read
+      '@deepseek-ai/dsh-settings':
+        specifier: link:../../../deepseek-harness/packages/settings/settings
+        version: link:../../../deepseek-harness/packages/settings/settings
+      '@deepseek-ai/dsh-timeout':
+        specifier: link:../../../deepseek-harness/packages/util/timeout
+        version: link:../../../deepseek-harness/packages/util/timeout
+      '@deepseek-ai/dsh-util-values':
+        specifier: link:../../../deepseek-harness/packages/util/values
+        version: link:../../../deepseek-harness/packages/util/values
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
+
+  packages/incident-router:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: link:../../../deepseek-harness/packages/core/agent
+        version: link:../../../deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-agent-default-model':
+        specifier: link:../../../deepseek-harness/packages/core/agent-default-model
+        version: link:../../../deepseek-harness/packages/core/agent-default-model
+      '@deepseek-ai/dsh-agent-presets':
+        specifier: link:../../../deepseek-harness/packages/preset/agent-presets
+        version: link:../../../deepseek-harness/packages/preset/agent-presets
+      '@deepseek-ai/dsh-llm':
+        specifier: link:../../../deepseek-harness/packages/llm/llm
+        version: link:../../../deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-permission-presets':
+        specifier: link:../../../deepseek-harness/packages/interaction/permission-presets
+        version: link:../../../deepseek-harness/packages/interaction/permission-presets
+      '@deepseek-ai/dsh-session':
+        specifier: link:../../../deepseek-harness/packages/core/session
+        version: link:../../../deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-session-persistence':
+        specifier: link:../../../deepseek-harness/packages/session/session-persistence
+        version: link:../../../deepseek-harness/packages/session/session-persistence
+      '@deepseek-ai/dsh-session-title':
+        specifier: link:../../../deepseek-harness/packages/session/session-title
+        version: link:../../../deepseek-harness/packages/session/session-title
+      '@deepseek-ai/dsh-webhook':
+        specifier: link:../../../deepseek-harness/packages/webhook/webhook
+        version: link:../../../deepseek-harness/packages/webhook/webhook
+      '@deepseek-ai/dsh-webhook-alertmanager':
+        specifier: workspace:^
+        version: link:../webhook-alertmanager
+      '@deepseek-ai/dsh-workspace':
+        specifier: link:../../../deepseek-harness/packages/workspace/workspace
+        version: link:../../../deepseek-harness/packages/workspace/workspace
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/dsh-aiops-incident':
+        specifier: workspace:^
+        version: link:../aiops-incident
+
+  packages/skill-k8s-diag:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-skill':
+        specifier: link:../../../deepseek-harness/packages/skill/skill
+        version: link:../../../deepseek-harness/packages/skill/skill
+
+  packages/tool-aiops-history:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: link:../../../deepseek-harness/packages/core/agent
+        version: link:../../../deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-brand':
+        specifier: link:../../../deepseek-harness/packages/util/brand
+        version: link:../../../deepseek-harness/packages/util/brand
+      '@deepseek-ai/dsh-session':
+        specifier: link:../../../deepseek-harness/packages/core/session
+        version: link:../../../deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-session-query':
+        specifier: link:../../../deepseek-harness/packages/session-query/session-query
+        version: link:../../../deepseek-harness/packages/session-query/session-query
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: link:../../../deepseek-harness/packages/core/system-prompt
+        version: link:../../../deepseek-harness/packages/core/system-prompt
+      '@deepseek-ai/dsh-timeout':
+        specifier: link:../../../deepseek-harness/packages/util/timeout
+        version: link:../../../deepseek-harness/packages/util/timeout
+      '@deepseek-ai/dsh-tools':
+        specifier: link:../../../deepseek-harness/packages/core/tools
+        version: link:../../../deepseek-harness/packages/core/tools
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: link:../../../deepseek-harness/vendor/include
+        version: link:../../../deepseek-harness/vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: link:../../../deepseek-harness/vendor/loader
+        version: link:../../../deepseek-harness/vendor/loader
+      '@deepseek-ai/dsh-aiops-incident':
+        specifier: workspace:^
+        version: link:../aiops-incident
+      '@deepseek-ai/dsh-aiops-incident-router':
+        specifier: workspace:^
+        version: link:../incident-router
+      '@deepseek-ai/dsh-llm':
+        specifier: link:../../../deepseek-harness/packages/llm/llm
+        version: link:../../../deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-session-persistence':
+        specifier: link:../../../deepseek-harness/packages/session/session-persistence
+        version: link:../../../deepseek-harness/packages/session/session-persistence
+      '@deepseek-ai/dsh-session-persistence-jsonl':
+        specifier: link:../../../deepseek-harness/packages/session/session-persistence-jsonl
+        version: link:../../../deepseek-harness/packages/session/session-persistence-jsonl
+      '@deepseek-ai/dsh-session-projection':
+        specifier: link:../../../deepseek-harness/packages/session/session-projection
+        version: link:../../../deepseek-harness/packages/session/session-projection
+      '@deepseek-ai/dsh-session-query-sqlite':
+        specifier: link:../../../deepseek-harness/packages/session-query/session-query-sqlite
+        version: link:../../../deepseek-harness/packages/session-query/session-query-sqlite
+
+  packages/tool-aiops-observe:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-llm':
+        specifier: link:../../../deepseek-harness/packages/llm/llm
+        version: link:../../../deepseek-harness/packages/llm/llm
+      '@deepseek-ai/dsh-tools':
+        specifier: link:../../../deepseek-harness/packages/core/tools
+        version: link:../../../deepseek-harness/packages/core/tools
+      '@deepseek-ai/dsh-util-values':
+        specifier: link:../../../deepseek-harness/packages/util/values
+        version: link:../../../deepseek-harness/packages/util/values
+    devDependencies:
+      '@deepseek-ai/cordis-plugin-include':
+        specifier: link:../../../deepseek-harness/vendor/include
+        version: link:../../../deepseek-harness/vendor/include
+      '@deepseek-ai/cordis-plugin-loader':
+        specifier: link:../../../deepseek-harness/vendor/loader
+        version: link:../../../deepseek-harness/vendor/loader
+      '@deepseek-ai/dsh-agent':
+        specifier: link:../../../deepseek-harness/packages/core/agent
+        version: link:../../../deepseek-harness/packages/core/agent
+      '@deepseek-ai/dsh-aiops-alertmanager':
+        specifier: workspace:^
+        version: link:../aiops-alertmanager
+      '@deepseek-ai/dsh-aiops-kubernetes':
+        specifier: workspace:^
+        version: link:../aiops-kubernetes
+      '@deepseek-ai/dsh-aiops-prometheus':
+        specifier: workspace:^
+        version: link:../aiops-prometheus
+      '@deepseek-ai/dsh-session':
+        specifier: link:../../../deepseek-harness/packages/core/session
+        version: link:../../../deepseek-harness/packages/core/session
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: link:../../../deepseek-harness/packages/core/system-prompt
+        version: link:../../../deepseek-harness/packages/core/system-prompt
+
+  packages/webhook-alertmanager:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: link:../../../deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
+      '@deepseek-ai/dsh-credentials':
+        specifier: link:../../../deepseek-harness/packages/credentials/credentials
+        version: link:../../../deepseek-harness/packages/credentials/credentials
+      '@deepseek-ai/dsh-host-webserver':
+        specifier: link:../../../deepseek-harness/packages/host/webserver
+        version: link:../../../deepseek-harness/packages/host/webserver
+      '@deepseek-ai/dsh-util-values':
+        specifier: link:../../../deepseek-harness/packages/util/values
+        version: link:../../../deepseek-harness/packages/util/values
+      '@deepseek-ai/dsh-webhook':
+        specifier: link:../../../deepseek-harness/packages/webhook/webhook
+        version: link:../../../deepseek-harness/packages/webhook/webhook
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery

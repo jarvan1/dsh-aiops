@@ -1,0 +1,141 @@
+# Read-only AIOps layer. Add this bundle after dsh-base and an application
+# surface such as dsh-headless. PROMETHEUS_URL and ALERTMANAGER_URL are
+# composition defaults that a local Web user can override live in AIOps
+# settings. The AIOPS_ALERTMANAGER_WEBHOOK_SECRET credential remains required.
+
+- id: session-query-sqlite
+  config:
+    path: !!js dshHomePath('aiops-incidents.sqlite')
+    openAt: startup
+
+- insert:
+    - id: webhook-runtime
+      name: '@deepseek-ai/dsh-webhook'
+
+    # Packaged global registration keeps the diagnostic playbook available even
+    # when AIOPS_WORKSPACE points outside this package or repository.
+    - id: aiops-skill-k8s-diag
+      name: '@deepseek-ai/dsh-aiops-skill-k8s-diag'
+
+    - id: aiops-incident-router
+      name: '@deepseek-ai/dsh-aiops-incident-router'
+      config:
+        source: primary-alertmanager
+        ruleId: aiops-alertmanager-router
+        statePath: !!js dshHomePath('aiops-router.sqlite')
+        workspacePath: !!js process.env.AIOPS_WORKSPACE || process.cwd()
+        agentPreset: standard
+        permissionPreset: read-only
+        alertnameAllowlist:
+          - KubePodCrashLooping
+          - KubeNodeNotReady
+          - KubePodNotReady
+          - KubeDeploymentReplicasMismatch
+          - KubeStatefulSetReplicasMismatch
+          - KubePersistentVolumeFillingUp
+          - KubePersistentVolumeErrors
+          - TargetDown
+          - HighErrorRate
+          - HighLatency
+        severityMap:
+          info: info
+          warning: warning
+          critical: critical
+        modelBudgets:
+          info: 2048
+          warning: 4096
+          critical: 8192
+        stormControl:
+          cooldownSeconds: 60
+          maxQueueSize: 100
+          maxQueueAgeSeconds: 900
+          maxDispatchAttempts: 3
+          retryBackoffSeconds: 10
+          globalConcurrency: 4
+          severityConcurrency:
+            info: 1
+            warning: 2
+            critical: 4
+          globalReservedTokens: 24576
+          severityReservedTokens:
+            info: 2048
+            warning: 8192
+            critical: 24576
+        diagnosisWindow:
+          beforeSeconds: 900
+          afterSeconds: 1800
+          prometheusStepSeconds: 30
+          logTailLines: 1000
+
+    - id: aiops-alertmanager-webhook-ingress
+      name: cordis:group
+      group: true
+      isolate:
+        webServer: true
+      config:
+        - id: aiops-alertmanager-webhook-server
+          name: '@deepseek-ai/dsh-host-webserver'
+          config:
+            host: !!js process.env.AIOPS_WEBHOOK_HOST || '127.0.0.1'
+            port: !!js Number(process.env.AIOPS_WEBHOOK_PORT || 3081)
+
+        - id: aiops-alertmanager-webhook-adapter
+          name: '@deepseek-ai/dsh-webhook-alertmanager'
+          config:
+            source: primary-alertmanager
+            path: /alertmanager
+            secretEnv: AIOPS_ALERTMANAGER_WEBHOOK_SECRET
+            maxBodyBytes: 1048576
+            maxAlerts: 100
+            maxMapEntries: 100
+            maxTextChars: 10000
+
+    - id: aiops-alertmanager
+      name: '@deepseek-ai/dsh-aiops-alertmanager'
+      config:
+        baseUrl: !!js process.env.ALERTMANAGER_URL
+        timeoutMs: 30000
+        maxResponseBytes: 2000000
+        maxFilterCount: 20
+        maxQueryValueChars: 1000
+
+    - id: aiops-prometheus
+      name: '@deepseek-ai/dsh-aiops-prometheus'
+      config:
+        baseUrl: !!js process.env.PROMETHEUS_URL
+        timeoutMs: 30000
+        maxResponseBytes: 2000000
+
+    - id: aiops-kubernetes
+      name: '@deepseek-ai/dsh-aiops-kubernetes'
+      config:
+        command: !!js process.env.KUBECTL_COMMAND || 'kubectl'
+        context: !!js process.env.KUBERNETES_CONTEXT
+        kubeconfig: !!js process.env.KUBECONFIG
+        graceMs: 5000
+        maxOutputBytes: 2000000
+        defaultLogTailLines: 200
+        maxLogTailLines: 2000
+
+    - id: aiops-observe-tools
+      name: '@deepseek-ai/dsh-tool-aiops-observe'
+
+    - id: aiops-incident
+      name: '@deepseek-ai/dsh-aiops-incident'
+
+    - id: aiops-history-tools
+      name: '@deepseek-ai/dsh-tool-aiops-history'
+      config:
+        defaultLimit: 20
+        maxLimit: 100
+        maxScanSessions: 500
+        timeoutMs: 30000
+
+    # Read-only Web tab over the configured diagnosis workspace. The endpoint
+    # is served by the application's existing Web server, not the webhook port.
+    - id: aiops-portal
+      name: '@deepseek-ai/dsh-aiops-portal'
+      config:
+        maxIncidents: 100
+        maxAuditRecords: 250
+        maxScanSessions: 500

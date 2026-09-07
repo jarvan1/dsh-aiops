@@ -1,0 +1,19 @@
+node_modules/
+.pnpm-store/
+packages/*/lib/
+coverage/
+*.tgz
+.env
+.env.*
+!.env.example
+.credentials.yaml
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.DS_Store
+
+# Stale local compiler output; the package builds into lib/.
+packages/skill-k8s-diag/src/index.js
+packages/skill-k8s-diag/src/index.js.map
+packages/skill-k8s-diag/src/index.d.ts
+packages/skill-k8s-diag/src/index.d.ts.map

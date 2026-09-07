@@ -1,0 +1,23 @@
+{
+  "name": "@deepseek-ai/dsh-aiops-workspace",
+  "version": "0.1.2-rc.1",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "build": "pnpm run clean && tsc -p packages/aiops-http-read && tsc -p packages/aiops-alertmanager && tsc -p packages/aiops-prometheus && tsc -p packages/aiops-kubernetes && tsc -p packages/aiops-incident && tsc -p packages/tool-aiops-observe && tsc -p packages/webhook-alertmanager && tsc -p packages/incident-router && tsc -p packages/tool-aiops-history && tsc -p packages/aiops-portal && node scripts/build-portal.mjs && tsc -p packages/skill-k8s-diag && tsc -p packages/aiops",
+    "typecheck": "pnpm run build",
+    "test": "pnpm run build && vitest run",
+    "docs:check": "node scripts/check-links.mjs",
+    "pack:bundle": "pnpm --filter @deepseek-ai/dsh-aiops pack"
+  },
+  "devDependencies": {
+    "@types/node": "link:../deepseek-harness/node_modules/@types/node",
+    "typescript": "link:../deepseek-harness/node_modules/typescript",
+    "vitest": "link:../deepseek-harness/node_modules/vitest"
+  }
+}
