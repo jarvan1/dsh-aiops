@@ -1,0 +1,135 @@
+# GitHub source-install entry point. Internal plugins use paths relative to
+# this repository package so they do not need to be published independently.
+
+- id: session-query-sqlite
+  config:
+    path: !!js dshHomePath('aiops-incidents.sqlite')
+    openAt: startup
+
+- insert:
+    - id: webhook-runtime
+      name: '@deepseek-ai/dsh-webhook'
+
+    - id: aiops-skill-k8s-diag
+      name: './packages/skill-k8s-diag/lib/index.js'
+
+    - id: aiops-incident-router
+      name: './packages/incident-router/lib/index.js'
+      config:
+        source: primary-alertmanager
+        ruleId: aiops-alertmanager-router
+        statePath: !!js dshHomePath('aiops-router.sqlite')
+        workspacePath: !!js process.env.AIOPS_WORKSPACE || process.cwd()
+        agentPreset: standard
+        permissionPreset: read-only
+        alertnameAllowlist:
+          - KubePodCrashLooping
+          - KubeNodeNotReady
+          - KubePodNotReady
+          - KubeDeploymentReplicasMismatch
+          - KubeStatefulSetReplicasMismatch
+          - KubePersistentVolumeFillingUp
+          - KubePersistentVolumeErrors
+          - TargetDown
+          - HighErrorRate
+          - HighLatency
+        severityMap:
+          info: info
+          warning: warning
+          critical: critical
+        modelBudgets:
+          info: 2048
+          warning: 4096
+          critical: 8192
+        stormControl:
+          cooldownSeconds: 60
+          maxQueueSize: 100
+          maxQueueAgeSeconds: 900
+          maxDispatchAttempts: 3
+          retryBackoffSeconds: 10
+          globalConcurrency: 4
+          severityConcurrency:
+            info: 1
+            warning: 2
+            critical: 4
+          globalReservedTokens: 24576
+          severityReservedTokens:
+            info: 2048
+            warning: 8192
+            critical: 24576
+        diagnosisWindow:
+          beforeSeconds: 900
+          afterSeconds: 1800
+          prometheusStepSeconds: 30
+          logTailLines: 1000
+
+    - id: aiops-alertmanager-webhook-ingress
+      name: cordis:group
+      group: true
+      isolate:
+        webServer: true
+      config:
+        - id: aiops-alertmanager-webhook-server
+          name: '@deepseek-ai/dsh-host-webserver'
+          config:
+            host: !!js process.env.AIOPS_WEBHOOK_HOST || '127.0.0.1'
+            port: !!js Number(process.env.AIOPS_WEBHOOK_PORT || 3081)
+
+        - id: aiops-alertmanager-webhook-adapter
+          name: './packages/webhook-alertmanager/lib/index.js'
+          config:
+            source: primary-alertmanager
+            path: /alertmanager
+            secretEnv: AIOPS_ALERTMANAGER_WEBHOOK_SECRET
+            maxBodyBytes: 1048576
+            maxAlerts: 100
+            maxMapEntries: 100
+            maxTextChars: 10000
+
+    - id: aiops-alertmanager
+      name: './packages/aiops-alertmanager/lib/index.js'
+      config:
+        baseUrl: !!js process.env.ALERTMANAGER_URL
+        timeoutMs: 30000
+        maxResponseBytes: 2000000
+        maxFilterCount: 20
+        maxQueryValueChars: 1000
+
+    - id: aiops-prometheus
+      name: './packages/aiops-prometheus/lib/index.js'
+      config:
+        baseUrl: !!js process.env.PROMETHEUS_URL
+        timeoutMs: 30000
+        maxResponseBytes: 2000000
+
+    - id: aiops-kubernetes
+      name: './packages/aiops-kubernetes/lib/index.js'
+      config:
+        command: !!js process.env.KUBECTL_COMMAND || 'kubectl'
+        context: !!js process.env.KUBERNETES_CONTEXT
+        kubeconfig: !!js process.env.KUBECONFIG
+        graceMs: 5000
+        maxOutputBytes: 2000000
+        defaultLogTailLines: 200
+        maxLogTailLines: 2000
+
+    - id: aiops-observe-tools
+      name: './packages/tool-aiops-observe/lib/index.js'
+
+    - id: aiops-incident
+      name: './packages/aiops-incident/lib/index.js'
+
+    - id: aiops-history-tools
+      name: './packages/tool-aiops-history/lib/index.js'
+      config:
+        defaultLimit: 20
+        maxLimit: 100
+        maxScanSessions: 500
+        timeoutMs: 30000
+
+    - id: aiops-portal
+      name: './packages/aiops-portal/lib/index.js'
+      config:
+        maxIncidents: 100
+        maxAuditRecords: 250
+        maxScanSessions: 500

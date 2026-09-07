@@ -1,8 +1,39 @@
 {
-  "name": "@deepseek-ai/dsh-aiops-workspace",
+  "name": "dsh-aiops",
+  "description": "Git-installable DSH bundle for read-only Kubernetes incident diagnosis",
   "version": "0.1.2-rc.1",
-  "private": true,
   "type": "module",
+  "main": "packages/aiops/lib/index.js",
+  "exports": {
+    ".": "./packages/aiops/lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "packages/*/lib/**/*.js",
+    "packages/*/lib/**/*.js.map",
+    "packages/*/package.json",
+    "packages/skill-k8s-diag/skills/**"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jarvan1/dsh-aiops.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "aiops",
+    "alertmanager",
+    "prometheus",
+    "kubernetes"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "packageManager": "pnpm@11.7.0",
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
@@ -10,14 +41,53 @@
   "scripts": {
     "clean": "node scripts/clean.mjs",
     "build": "pnpm run clean && tsc -p packages/aiops-http-read && tsc -p packages/aiops-alertmanager && tsc -p packages/aiops-prometheus && tsc -p packages/aiops-kubernetes && tsc -p packages/aiops-incident && tsc -p packages/tool-aiops-observe && tsc -p packages/webhook-alertmanager && tsc -p packages/incident-router && tsc -p packages/tool-aiops-history && tsc -p packages/aiops-portal && node scripts/build-portal.mjs && tsc -p packages/skill-k8s-diag && tsc -p packages/aiops",
+    "build:github": "pnpm run build && node scripts/prepare-github.mjs",
     "typecheck": "pnpm run build",
     "test": "pnpm run build && vitest run",
     "docs:check": "node scripts/check-links.mjs",
-    "pack:bundle": "pnpm --filter @deepseek-ai/dsh-aiops pack"
+    "pack:bundle": "pnpm --filter @deepseek-ai/dsh-aiops pack",
+    "prepare": "pnpm run build:github"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-agent": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-agent-default-model": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-brand": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-permission-presets": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-persistence": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-projection": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-query-sqlite": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-title": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-subprocess": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-timeout": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-util-values": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-webhook": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-workspace": "^0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
   },
   "devDependencies": {
-    "@types/node": "link:../deepseek-harness/node_modules/@types/node",
-    "typescript": "link:../deepseek-harness/node_modules/typescript",
-    "vitest": "link:../deepseek-harness/node_modules/vitest"
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@types/node": "22.20.0",
+    "jsdom": "29.1.1",
+    "typescript": "6.0.3",
+    "vitest": "4.1.8"
   }
 }

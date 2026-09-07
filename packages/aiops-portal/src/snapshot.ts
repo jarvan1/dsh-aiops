@@ -49,10 +49,9 @@ export async function readPortalSnapshot(
   const incidents: PortalIncident[] = []
   for (const session of sessions.slice(0, limits.maxScanSessions)) {
     signal?.throwIfAborted()
-    const [reportHits, feedbackHits] = await Promise.all([
-      ctx.sessionQuery.filterEvents(session.header.id, [{ kind: 'type', values: ['aiops/incident-state'] }]),
-      ctx.sessionQuery.filterEvents(session.header.id, [{ kind: 'type', values: ['aiops/operator-feedback'] }]),
-    ])
+    const events = await ctx.sessionQuery.listEvents(session.header.id)
+    const reportHits = events.filter(event => event.type === 'aiops/incident-state')
+    const feedbackHits = events.filter(event => event.type === 'aiops/operator-feedback')
     const reportHit = reportHits.at(-1)
     if (reportHit === undefined) continue
     const reportWindow = await ctx.sessionQuery.readEvent({ sessionId: session.header.id, seq: reportHit.seq }, signal)

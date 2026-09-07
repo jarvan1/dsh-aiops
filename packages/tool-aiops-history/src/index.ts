@@ -11,10 +11,13 @@ import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session'
 import {
   decodeAiopsIncidentState,
   decodeAiopsOperatorFeedback,
+  feedbackSearchText,
+  incidentSearchText,
   type AiopsIncidentState,
   type AiopsOperatorFeedback,
 } from '@deepseek-ai/dsh-aiops-incident'
 import type { RouteAuditOutcome } from '@deepseek-ai/dsh-aiops-incident-router'
+import { compileSessionTextFilter } from '@deepseek-ai/dsh-session-query'
 import type { SessionEventSearchHit, SessionResultFilter } from '@deepseek-ai/dsh-session-query'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import { defineTool, type ToolRunContext } from '@deepseek-ai/dsh-tools'
@@ -145,7 +148,14 @@ export function apply(ctx: Context, config: Config): void {
     output: TEXT_OUTPUT,
     timeoutMs: resolved.timeoutMs,
     execute: async (args, exec) => JSON.stringify(
-      await searchIncidents(ctx, callerOf(exec), args.query, resolveLimit(args.limit, resolved), exec.signal),
+      await searchIncidents(
+        ctx,
+        callerOf(exec),
+        args.query,
+        resolveLimit(args.limit, resolved),
+        resolved.maxScanSessions,
+        exec.signal,
+      ),
       null,
       2,
     ),
@@ -258,9 +268,8 @@ async function listIncidents(
   const records: IncidentRecord[] = []
   for (const session of sessions.slice(0, maxScanSessions)) {
     signal.throwIfAborted()
-    const events = await ctx.sessionQuery.filterEvents(session.header.id, [
-      { kind: 'type', values: ['aiops/incident-state'] },
-    ])
+    const events = (await ctx.sessionQuery.listEvents(session.header.id))
+      .filter(event => event.type === 'aiops/incident-state')
     for (const event of events) records.push(await readIncidentHit(ctx, event, signal))
   }
   return records.sort(compareNewest).slice(0, limit)
@@ -302,17 +311,22 @@ async function searchIncidents(
   caller: Caller,
   query: string,
   limit: number,
+  maxScanSessions: number,
   signal: AbortSignal,
 ): Promise<IncidentRecord[]> {
-  const page = await ctx.sessionQuery.searchSessions({
-    query,
-    sessionFilters: workspaceFilters(caller),
-    eventFilters: [{ kind: 'type', values: ['aiops/incident-state'] }],
-    limit,
-  }, { signal })
+  const matcher = compileSessionTextFilter(query)
+  const sessions = await ctx.sessionQuery.filterSessions(workspaceFilters(caller), signal)
   const records: IncidentRecord[] = []
-  for (const hit of page.items) records.push(await readIncidentHit(ctx, hit.bestMatch, signal))
-  return records.sort(compareNewest)
+  for (const session of sessions.slice(0, maxScanSessions)) {
+    signal.throwIfAborted()
+    const events = (await ctx.sessionQuery.listEvents(session.header.id))
+      .filter(event => event.type === 'aiops/incident-state')
+    for (const event of events) {
+      const record = await readIncidentHit(ctx, event, signal)
+      if (matcher.test(incidentSearchText(record.incident))) records.push(record)
+    }
+  }
+  return records.sort(compareNewest).slice(0, limit)
 }
 
 async function listFeedback(
@@ -325,22 +339,15 @@ async function listFeedback(
   signal: AbortSignal,
 ): Promise<FeedbackRecord[]> {
   const records: FeedbackRecord[] = []
-  if (query !== undefined && query.trim() !== '') {
-    const page = await ctx.sessionQuery.searchSessions({
-      query,
-      sessionFilters: workspaceFilters(caller),
-      eventFilters: [{ kind: 'type', values: ['aiops/operator-feedback'] }],
-      limit,
-    }, { signal })
-    for (const hit of page.items) records.push(await readFeedbackHit(ctx, hit.bestMatch, signal))
-  } else {
-    const sessions = await ctx.sessionQuery.filterSessions(workspaceFilters(caller), signal)
-    for (const session of sessions.slice(0, maxScanSessions)) {
-      signal.throwIfAborted()
-      const events = await ctx.sessionQuery.filterEvents(session.header.id, [
-        { kind: 'type', values: ['aiops/operator-feedback'] },
-      ])
-      for (const event of events) records.push(await readFeedbackHit(ctx, event, signal))
+  const matcher = query === undefined || query.trim() === '' ? undefined : compileSessionTextFilter(query)
+  const sessions = await ctx.sessionQuery.filterSessions(workspaceFilters(caller), signal)
+  for (const session of sessions.slice(0, maxScanSessions)) {
+    signal.throwIfAborted()
+    const events = (await ctx.sessionQuery.listEvents(session.header.id))
+      .filter(event => event.type === 'aiops/operator-feedback')
+    for (const event of events) {
+      const record = await readFeedbackHit(ctx, event, signal)
+      if (matcher === undefined || matcher.test(feedbackSearchText(record.feedback))) records.push(record)
     }
   }
   return records.filter(record => verdict === undefined || record.feedback.verdict === verdict)

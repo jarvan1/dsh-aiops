@@ -134,7 +134,7 @@ describe('AIOps Portal read model', () => {
       },
       sessionQuery: {
         filterSessions: vi.fn(async () => [{ header: { id: 'aiops-session-1' } }]),
-        filterEvents: vi.fn(async (_sessionId: string, filters: Array<{ values: string[] }>) => filters[0]?.values[0] === 'aiops/incident-state' ? reportHits : []),
+        listEvents: vi.fn(async () => reportHits),
         readEvent: vi.fn(async ({ seq }: { seq: number }) => ({ target: { type: 'aiops/incident-state', data: seq === 3 ? latest : older } })),
       },
     }

@@ -66,7 +66,12 @@ describe('AIOps incident through a real Loader composition', () => {
     await ctx.loader.await()
 
     const session = ctx.sessions.create(SessionId('aiops-incident-loader'), { meta: { cwd: root } })
-    const writeHandle = await ctx.sessionPersistence.create(session.header)
+    const modernPersistence = 'stat' in ctx.sessionPersistence
+    const writeHandle = modernPersistence
+      ? await (ctx.sessionPersistence.create as unknown as (
+          header: typeof session.header,
+        ) => Promise<{ close(): Promise<void>, read(): Promise<readonly unknown[]> }>)(session.header)
+      : undefined
     const report = {
       version: 1,
       incidentId: 'inc-payments-1',
@@ -102,13 +107,28 @@ describe('AIOps incident through a real Loader composition', () => {
     const replayedFeedback = await ctx.tools.execute(feedbackCall)
     expect(replayedFeedback.isError).toBe(false)
 
-    await writeHandle.close()
-    const readHandle = await ctx.sessionPersistence.open(session.id, 'read')
-    const durable = await readHandle.read()
-    await readHandle.close()
+    let durable: readonly unknown[]
+    if (writeHandle !== undefined) {
+      await writeHandle.close()
+      const readHandle = await (ctx.sessionPersistence as unknown as {
+        open(id: typeof session.id, mode: 'read'): Promise<{ close(): Promise<void>, read(): Promise<readonly unknown[]> }>
+      }).open(session.id, 'read')
+      durable = await readHandle.read()
+      await readHandle.close()
+    } else {
+      durable = (await ctx.sessionPersistence.inspect(session.id)).events
+    }
     expect(durable).toHaveLength(2)
-    expect(durable[0]).toMatchObject({ type: 'aiops/incident-state', data: report, ignorable: true })
-    expect(durable[1]).toMatchObject({ type: 'aiops/operator-feedback', data: { verdict: 'corrected' }, ignorable: true })
+    expect(durable[0]).toMatchObject({
+      type: 'aiops/incident-state',
+      data: report,
+      ...(modernPersistence ? { ignorable: true } : {}),
+    })
+    expect(durable[1]).toMatchObject({
+      type: 'aiops/operator-feedback',
+      data: { verdict: 'corrected' },
+      ...(modernPersistence ? { ignorable: true } : {}),
+    })
 
     expect(ctx.tools.get('aiops_incident_report')?.presentCall?.({ incident: report })).toEqual({
       card: 'generic', title: 'Record AIOps incident', kind: 'other', rawInput: report,

@@ -34,6 +34,27 @@ export const name = 'aiops-incident'
 /** Registries and durability services required by the incident workflow. */
 export const inject = ['tools', 'sessions', 'sessionPersistence', 'sessionProjections']
 
+interface EventTextExtractorRegistrar {
+  registerEventTextExtractor?: (definition: {
+    eventType: string
+    revision: string
+    extract: (event: { data: unknown }) => string
+  }) => () => void
+}
+
+function appendIgnorableEvent(
+  session: Parameters<Context['sessions']['flush']>[0],
+  type: 'aiops/incident-state' | 'aiops/operator-feedback',
+  data: AiopsIncidentState | AiopsOperatorFeedback,
+): void {
+  const append = session.append as unknown as (
+    eventType: typeof type,
+    eventData: typeof data,
+    options?: { ignorable: true },
+  ) => unknown
+  append.call(session, type, data, { ignorable: true })
+}
+
 /** Latest-whole-value incident projection. */
 export const aiopsIncidentProjectionDefinition = {
   key: 'aiopsIncident',
@@ -127,15 +148,17 @@ export function apply(ctx: Context): void {
   ctx.sessionProjections.register(aiopsFeedbackProjectionDefinition)
   ctx.inject(['sessionQuery'], (queryCtx) => {
     queryCtx.effect(() => {
-      const disposeIncident = queryCtx.sessionQuery.registerEventTextExtractor({
+      const registrar = queryCtx.sessionQuery as typeof queryCtx.sessionQuery & EventTextExtractorRegistrar
+      if (registrar.registerEventTextExtractor === undefined) return () => {}
+      const disposeIncident = registrar.registerEventTextExtractor({
         eventType: 'aiops/incident-state',
         revision: '1',
-        extract: event => incidentSearchText(event.data),
+        extract: event => incidentSearchText(decodeAiopsIncidentState(event.data)),
       })
-      const disposeFeedback = queryCtx.sessionQuery.registerEventTextExtractor({
+      const disposeFeedback = registrar.registerEventTextExtractor({
         eventType: 'aiops/operator-feedback',
         revision: '1',
-        extract: event => feedbackSearchText(event.data),
+        extract: event => feedbackSearchText(decodeAiopsOperatorFeedback(event.data)),
       })
       return () => { disposeFeedback(); disposeIncident() }
     }, 'aiopsIncident.sessionQueryText')
@@ -155,7 +178,7 @@ export function apply(ctx: Context): void {
       const next = decodeAiopsIncidentState(args.incident)
       const previous = ctx.sessionProjections.stateOf(agent.session, 'aiopsIncident') ?? null
       validateAiopsIncidentTransition(previous, next)
-      agent.session.append('aiops/incident-state', next, { ignorable: true })
+      appendIgnorableEvent(agent.session, 'aiops/incident-state', next)
       await requireFlush(ctx, agent.session)
       return next
     },
@@ -196,7 +219,7 @@ export function apply(ctx: Context): void {
         ...(args.correction === undefined ? {} : { correction: args.correction }),
         origin: 'operator-via-agent',
       })
-      agent.session.append('aiops/operator-feedback', feedback, { ignorable: true })
+      appendIgnorableEvent(agent.session, 'aiops/operator-feedback', feedback)
       await requireFlush(ctx, agent.session)
       return feedback
     },
@@ -204,7 +227,7 @@ export function apply(ctx: Context): void {
   }))
 }
 
-function incidentSearchText(incident: AiopsIncidentState): string {
+export function incidentSearchText(incident: AiopsIncidentState): string {
   return [
     incident.incidentId,
     incident.title,
@@ -216,7 +239,7 @@ function incidentSearchText(incident: AiopsIncidentState): string {
   ].map(part => part.trim()).filter(Boolean).join('\n')
 }
 
-function feedbackSearchText(feedback: AiopsOperatorFeedback): string {
+export function feedbackSearchText(feedback: AiopsOperatorFeedback): string {
   return [
     feedback.feedbackId,
     feedback.incidentId,

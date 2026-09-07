@@ -1,48 +1,11 @@
 packages:
   - packages/*
 
-onlyBuiltDependencies:
-  - esbuild
-
-overrides:
-  '@deepseek-ai/cordis': link:../deepseek-harness/vendor/cordis
-  '@deepseek-ai/cordis-plugin-include': link:../deepseek-harness/vendor/include
-  '@deepseek-ai/cordis-plugin-loader': link:../deepseek-harness/vendor/loader
-  '@deepseek-ai/dsh-agent': link:../deepseek-harness/packages/core/agent
-  '@deepseek-ai/dsh-agent-default-model': link:../deepseek-harness/packages/core/agent-default-model
-  '@deepseek-ai/dsh-agent-presets': link:../deepseek-harness/packages/preset/agent-presets
-  '@deepseek-ai/dsh-brand': link:../deepseek-harness/packages/util/brand
-  '@deepseek-ai/dsh-client-locale': link:../deepseek-harness/packages/client/locale
-  '@deepseek-ai/dsh-client-ui-conversation': link:../deepseek-harness/packages/client/ui-conversation
-  '@deepseek-ai/dsh-client-ui-renderer': link:../deepseek-harness/packages/client/ui-renderer
-  '@deepseek-ai/dsh-client-ui-settings': link:../deepseek-harness/packages/client/ui-settings
-  '@deepseek-ai/dsh-client-ui-sidebar': link:../deepseek-harness/packages/client/ui-sidebar
-  '@deepseek-ai/dsh-client-ui-slots': link:../deepseek-harness/packages/client/ui-slots
-  '@deepseek-ai/dsh-credentials': link:../deepseek-harness/packages/credentials/credentials
-  '@deepseek-ai/dsh-host-webserver': link:../deepseek-harness/packages/host/webserver
-  '@deepseek-ai/dsh-llm': link:../deepseek-harness/packages/llm/llm
-  '@deepseek-ai/dsh-permission-presets': link:../deepseek-harness/packages/interaction/permission-presets
-  '@deepseek-ai/dsh-session': link:../deepseek-harness/packages/core/session
-  '@deepseek-ai/dsh-session-persistence': link:../deepseek-harness/packages/session/session-persistence
-  '@deepseek-ai/dsh-session-persistence-jsonl': link:../deepseek-harness/packages/session/session-persistence-jsonl
-  '@deepseek-ai/dsh-session-projection': link:../deepseek-harness/packages/session/session-projection
-  '@deepseek-ai/dsh-session-query': link:../deepseek-harness/packages/session-query/session-query
-  '@deepseek-ai/dsh-session-query-sqlite': link:../deepseek-harness/packages/session-query/session-query-sqlite
-  '@deepseek-ai/dsh-session-title': link:../deepseek-harness/packages/session/session-title
-  '@deepseek-ai/dsh-settings': link:../deepseek-harness/packages/settings/settings
-  '@deepseek-ai/dsh-skill': link:../deepseek-harness/packages/skill/skill
-  '@deepseek-ai/dsh-subprocess': link:../deepseek-harness/packages/subprocess/subprocess
-  '@deepseek-ai/dsh-subprocess-local': link:../deepseek-harness/packages/subprocess/subprocess-local
-  '@deepseek-ai/dsh-system-prompt': link:../deepseek-harness/packages/core/system-prompt
-  '@deepseek-ai/dsh-timeout': link:../deepseek-harness/packages/util/timeout
-  '@deepseek-ai/dsh-tools': link:../deepseek-harness/packages/core/tools
-  '@deepseek-ai/dsh-util-values': link:../deepseek-harness/packages/util/values
-  '@deepseek-ai/dsh-webhook': link:../deepseek-harness/packages/webhook/webhook
-  '@deepseek-ai/dsh-workspace': link:../deepseek-harness/packages/workspace/workspace
-  '@deepseek-ai/schemastery': link:../deepseek-harness/vendor/schemastery
-  '@types/react': link:../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react
-  '@types/react-dom': link:../deepseek-harness/packages/client/ui-trajectory/node_modules/@types/react-dom
-  react: link:../deepseek-harness/packages/client/ui-trajectory/node_modules/react
-  react-dom: link:../deepseek-harness/packages/client/ui-trajectory/node_modules/react-dom
-  tsdown: link:../deepseek-harness/node_modules/.pnpm/tsdown@0.22.2_oxc-resolver@11.20.0_publint@0.3.21_tsx@4.22.4_typescript@6.0.3/node_modules/tsdown
-  zod: link:../deepseek-harness/packages/llm/llm/node_modules/zod
+# pnpm 10+ treats unreviewed lifecycle scripts as an install error. Only
+# esbuild is needed by this repository's prepare step; the denied native
+# packages arrive through DSH development peers and are not executed here.
+allowBuilds:
+  esbuild: true
+  '@deepseek-ai/dsh-subprocess-local': false
+  koffi: false
+  node-pty: false

@@ -229,17 +229,17 @@ describe('AIOps incident history through a real Loader composition', () => {
 
     caller.append('aiops/incident-state', incident('inc-caller', 'Checkout update'))
     const originalFilterSessions = ctx.sessionQuery.filterSessions.bind(ctx.sessionQuery)
-    const originalFilterEvents = ctx.sessionQuery.filterEvents.bind(ctx.sessionQuery)
+    const originalListEvents = ctx.sessionQuery.listEvents.bind(ctx.sessionQuery)
     ctx.sessionQuery.filterSessions = () => Promise.resolve([
       { header: caller.header, live: true, persisted: false },
       { header: prior.header, live: true, persisted: false },
     ])
-    ctx.sessionQuery.filterEvents = sessionId => Promise.resolve(sessionId === caller.id
+    ctx.sessionQuery.listEvents = sessionId => Promise.resolve(sessionId === caller.id
       ? [
-        { sessionId: caller.id, seq: 0 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only', text: 'a' },
-        { sessionId: caller.id, seq: 1 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only', text: 'b' },
+        { sessionId: caller.id, seq: 0 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only' },
+        { sessionId: caller.id, seq: 1 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only' },
       ]
-      : [{ sessionId: prior.id, seq: 1 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only', text: 'c' }])
+      : [{ sessionId: prior.id, seq: 1 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only' }])
     const tied = await execute('aiops_incident_list', { limit: 3 })
     expect(tied.isError).toBe(false)
     if (tied.isError) throw tied.error
@@ -247,7 +247,7 @@ describe('AIOps incident history through a real Loader composition', () => {
     expect(tiedRecords.map(item => [item.sessionId, item.seq]))
       .toEqual([['prior', 1], ['caller', 1], ['caller', 0]])
     ctx.sessionQuery.filterSessions = originalFilterSessions
-    ctx.sessionQuery.filterEvents = originalFilterEvents
+    ctx.sessionQuery.listEvents = originalListEvents
 
     const isolated = ctx.sessions.create(SessionId('isolated'), { meta: { createdAt: 4 } })
     isolated.append('aiops/incident-state', incident('inc-isolated', 'Isolated'))
@@ -269,9 +269,16 @@ describe('AIOps incident history through a real Loader composition', () => {
     const incidentEntry = [...ctx.loader.entries()].find(candidate =>
       candidate.options.name === '@deepseek-ai/dsh-aiops-incident')
     if (incidentEntry?.fiber === undefined) throw new Error('missing AIOps incident Loader fiber')
-    expect(ctx.sessionQuery.extractEventText(caller.snapshotEvents()[0]!)).toContain('Checkout')
+    const queryWithExtractors = ctx.sessionQuery as typeof ctx.sessionQuery & {
+      extractEventText?: (event: ReturnType<typeof caller.snapshotEvents>[number]) => string
+    }
+    if (queryWithExtractors.extractEventText !== undefined) {
+      expect(queryWithExtractors.extractEventText(caller.snapshotEvents()[0]!)).toContain('Checkout')
+    }
     await incidentEntry.fiber.dispose()
-    expect(ctx.sessionQuery.extractEventText(caller.snapshotEvents()[0]!)).toBe('')
+    if (queryWithExtractors.extractEventText !== undefined) {
+      expect(queryWithExtractors.extractEventText(caller.snapshotEvents()[0]!)).toBe('')
+    }
     expect(ctx.tools.schemas()).toEqual([])
   }, 30_000)
 })

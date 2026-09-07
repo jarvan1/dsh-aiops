@@ -39,6 +39,27 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+function appendIgnorableRouteEvent(session: Agent['session'], event: AiopsAlertRouteEvent): void {
+  const append = session.append as unknown as (
+    type: 'aiops/alert-routed',
+    data: AiopsAlertRouteEvent,
+    options?: { ignorable: true },
+  ) => unknown
+  append.call(session, 'aiops/alert-routed', event, { ignorable: true })
+}
+
+async function hasPersistedSession(
+  persistence: Context['sessionPersistence'],
+  sessionId: AcceptedRoute['sessionId'],
+  signal: AbortSignal,
+): Promise<boolean> {
+  const compatible = persistence as typeof persistence & {
+    stat?: (id: AcceptedRoute['sessionId'], options?: { signal?: AbortSignal }) => Promise<unknown | undefined>
+  }
+  if (compatible.stat !== undefined) return await compatible.stat(sessionId, { signal }) !== undefined
+  return (await persistence.listSnapshots(signal)).some(snapshot => snapshot.header.id === sessionId)
+}
+
 /** Router policy and Session composition. */
 export interface Config {
   readonly source: string
@@ -442,7 +463,7 @@ export class AiopsIncidentRouter extends Service {
         this.store.markStarted(item.item, item.route, startedAt, cooldownUntil, reservation.tokens)
         const event = this.routeEvent(item.item, item.route)
         if (!hasRouteEvent(agent, item.item.source, item.item.deliveryId, item.item.alert.fingerprint)) {
-          agent.session.append('aiops/alert-routed', event, { ignorable: true })
+          appendIgnorableRouteEvent(agent.session, event)
         }
         events.push(event)
       }
@@ -582,7 +603,7 @@ export class AiopsIncidentRouter extends Service {
       group: groupContext(delivery.event),
       alert,
     }
-    agent.session.append('aiops/alert-routed', event, { ignorable: true })
+    appendIgnorableRouteEvent(agent.session, event)
     if (!await this.ctx.sessions.flush(agent.session)) {
       throw new Error(`incident router could not flush Session ${route.sessionId}`)
     }
@@ -631,12 +652,12 @@ export class AiopsIncidentRouter extends Service {
       await this.ctx.agentPresets.mount(agentCtx, preset.id)
     }
     signal.throwIfAborted()
-    const persisted = await this.ctx.sessionPersistence.stat(route.sessionId, { signal })
+    const persisted = await hasPersistedSession(this.ctx.sessionPersistence, route.sessionId, signal)
     let handle: AgentHandle | undefined
     let created = false
     let attached = false
     try {
-      if (persisted === undefined) {
+      if (!persisted) {
         handle = await this.ctx.agents.create({
           sessionId: route.sessionId,
           signal,

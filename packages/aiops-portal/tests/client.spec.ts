@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, createElement } from 'react'
+import { createElement } from 'react'
+import { act } from 'react-dom/test-utils'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { ConnectionSettings } from '../src/client/ConnectionSettings.tsx'
