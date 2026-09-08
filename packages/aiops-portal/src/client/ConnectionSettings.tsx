@@ -4,7 +4,7 @@ import type { ConnectionTarget, ConnectionTestFailureCode, ConnectionTestRequest
 import type { PortalViewInjected } from './contracts.ts'
 import css from './portal.module.css'
 
-type Props = Pick<PortalViewInjected, 'testConnection' | 'prometheusSettings' | 'alertmanagerSettings' | 'kubernetesSettings'> & PropsLocale<'aiops-portal'>
+type Props = Pick<PortalViewInjected, 'loadWebhookConfiguration' | 'testConnection' | 'prometheusSettings' | 'alertmanagerSettings' | 'kubernetesSettings'> & PropsLocale<'aiops-portal'>
 type TestState =
   | { readonly status: 'idle' }
   | { readonly status: 'testing'; readonly testedValue: string }
@@ -36,7 +36,7 @@ function ConnectionStatus({ state, currentValue, t }: { state: TestState; curren
   return <span className={css.testFailed}>{failureMessage(state, t)}</span>
 }
 
-export function ConnectionSettings({ testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t }: Props) {
+export function ConnectionSettings({ loadWebhookConfiguration, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t }: Props) {
   const prometheus = useSyncExternalStore(listener => prometheusSettings.subscribe(listener), () => prometheusSettings.getSnapshot())
   const alertmanager = useSyncExternalStore(listener => alertmanagerSettings.subscribe(listener), () => alertmanagerSettings.getSnapshot())
   const kubernetes = useSyncExternalStore(listener => kubernetesSettings.subscribe(listener), () => kubernetesSettings.getSnapshot())
@@ -45,6 +45,19 @@ export function ConnectionSettings({ testConnection, prometheusSettings, alertma
   const [dirty, setDirty] = useState(false); const [initialized, setInitialized] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [prometheusTest, setPrometheusTest] = useState<TestState>(IDLE_TEST); const [alertmanagerTest, setAlertmanagerTest] = useState<TestState>(IDLE_TEST); const [kubernetesTest, setKubernetesTest] = useState<TestState>(IDLE_TEST)
+  const [webhook, setWebhook] = useState<{ readonly url: string; readonly secretConfigured: boolean; readonly secret?: string }>()
+  const [secretVisible, setSecretVisible] = useState(false)
+  const [webhookState, setWebhookState] = useState<'loading' | 'ready' | 'error'>('loading')
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadWebhookConfiguration(false, controller.signal).then(value => {
+      setWebhook(value); setWebhookState('ready')
+    }).catch(error => {
+      if (!(error instanceof DOMException && error.name === 'AbortError')) setWebhookState('error')
+    })
+    return () => controller.abort()
+  }, [loadWebhookConfiguration])
 
   useEffect(() => {
     if (dirty || prometheus.status !== 'ready' || alertmanager.status !== 'ready' || kubernetes.status !== 'ready') return
@@ -80,6 +93,20 @@ export function ConnectionSettings({ testConnection, prometheusSettings, alertma
     } catch { setSaveState('error') }
   }
   const edit = (reset: (state: TestState) => void) => { setDirty(true); setSaveState('idle'); reset(IDLE_TEST) }
+  const toggleSecret = async (): Promise<void> => {
+    if (secretVisible) {
+      setSecretVisible(false)
+      setWebhook(current => current === undefined ? current : { url: current.url, secretConfigured: current.secretConfigured })
+      return
+    }
+    setWebhookState('loading')
+    try {
+      const value = await loadWebhookConfiguration(true)
+      setWebhook(value); setSecretVisible(value.secret !== undefined); setWebhookState('ready')
+    } catch {
+      setWebhookState('error')
+    }
+  }
 
   return <section className={css.settingsPanel}>
     <div className={css.settingsIntro}><div><div className={css.eyebrow}>{t('settings')}</div><h2>{t('settingsTitle')}</h2><p>{t('settingsDescription')}</p></div><div className={css.liveBadge}><span/>LIVE</div></div>
@@ -100,6 +127,16 @@ export function ConnectionSettings({ testConnection, prometheusSettings, alertma
         <label className={css.endpointTitle} htmlFor="aiops-kubernetes-context">{t('kubernetesContext')}</label>
         <input id="aiops-kubernetes-context" type="text" autoComplete="off" value={context} placeholder={t('kubernetesContextHint')} onChange={event => { setContext(event.target.value); edit(setKubernetesTest) }}/>
         <div className={css.testRow}><ConnectionStatus state={kubernetesTest} currentValue={nextKubernetes} t={t}/><button type="button" disabled={!validKubernetes(nextKubeconfig, nextContext) || kubernetesTest.status === 'testing'} onClick={() => { void runTest('kubernetes') }}>{kubernetesTest.status === 'testing' ? t('connectionTesting') : t('testConnection')}</button></div>
+      </div>
+      <div className={css.endpointCard}>
+        <label className={css.endpointTitle} htmlFor="aiops-webhook-url"><span className={`${css.serviceDot} ${css.alertDot}`}/>{t('webhookUrl')}</label>
+        <input id="aiops-webhook-url" type="url" readOnly value={webhook?.url ?? ''} placeholder={webhookState === 'loading' ? t('webhookLoading') : ''}/>
+        <label className={css.endpointTitle} htmlFor="aiops-webhook-secret">{t('webhookSecret')}</label>
+        <div className={css.secretRow}>
+          <input id="aiops-webhook-secret" type={secretVisible ? 'text' : 'password'} readOnly autoComplete="off" value={secretVisible ? webhook?.secret ?? '' : ''} placeholder={webhook?.secretConfigured === true ? t('secretConfigured') : t('secretUnavailable')}/>
+          <button type="button" aria-pressed={secretVisible} disabled={webhookState === 'loading' || webhook?.secretConfigured !== true} onClick={() => { void toggleSecret() }}>{webhookState === 'loading' ? t('webhookLoading') : secretVisible ? t('hideSecret') : t('showSecret')}</button>
+        </div>
+        <div className={webhookState === 'error' ? css.testFailed : css.webhookHint}>{webhookState === 'error' ? t('webhookLoadError') : t('webhookReadOnly')}</div>
       </div>
     </div>
     <div className={css.settingsFooter}><div><p>{t('settingsRule')}</p><div className={css.saveMessage} aria-live="polite">{unavailable ? t('settingsUnavailable') : saveState === 'saved' ? t('saved') : saveState === 'error' ? t('saveError') : !tested && dirty ? t('testRequired') : ''}</div></div><button type="button" disabled={!writable || !dirty || !valid || !tested || saveState === 'saving'} onClick={() => { void save() }}>{saveState === 'saving' ? t('saving') : t('save')}</button></div>

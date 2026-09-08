@@ -104,7 +104,7 @@ describe('incident route store', () => {
       deliveryId: 'filtered',
       payloadDigest: 'digest-a',
       alert: alert('firing'),
-      reason: 'alertname-not-allowed' as const,
+      reason: 'alertname-ignored' as const,
       receivedAt: 1,
     }
     expect(() => { store.recordFiltered(input); store.recordFiltered(input) }).not.toThrow()

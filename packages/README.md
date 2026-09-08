@@ -36,7 +36,7 @@ Twelve packages cover ingress, routing, acquisition, model interaction, a packag
 | [`aiops-portal/`](aiops-portal/README.md) | Read-only Web incident overview, filters, detail, and route audit | `conversation.view`, `/api/aiops/portal` |
 | [`webhook-alertmanager/`](webhook-alertmanager/README.md) | Bearer-authenticated, bounded Alertmanager v4 HTTP adapter | `ctx.webhookRuntime.dispatch()` |
 | [`incident-router/`](incident-router/README.md) | Fingerprint rounds, replay protection, durable queue, storm control, and deterministic Session lifecycle | `ctx.aiopsIncidentRouter` |
-| [`skill-k8s-diag/`](skill-k8s-diag/README.md) | Versioned alert-time Kubernetes diagnosis workflow available across Workspaces | `k8s-diag` skill |
+| [`skill-k8s-diag/`](skill-k8s-diag/README.md) | Versioned general alert-time diagnosis workflow available across Workspaces; package path retained for compatibility | `aiops-diag` skill |
 | [`aiops/`](aiops/README.md) | Installable profile patch containing the runtime rows and enabling the derived index | `dsh.bundle.patch` |
 
 <a id="related-documentation"></a>

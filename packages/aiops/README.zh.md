@@ -9,7 +9,7 @@ kind: "package-bundle"
 
 ## 概述
 
-本 bundle 为现有 DSH profile 添加 Alertmanager 驱动的只读 AIOps 工作流。它挂载专用 webhook listener、带持久队列/冷却/资源预算的 fingerprint router、随包发布的 `k8s-diag` skill、三个观测 Provider、七个观测工具、报告与反馈写入工具、五个工作区范围历史/审计工具，以及 Web Portal。随附 profile 默认都不包含它。启动需要 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`；服务端点与 kubeconfig 路径可以通过环境默认值提供，也可以在 Portal 中实时保存。Kubernetes 读取需要只读集群凭据，但不再要求 kubectl。
+本 bundle 为现有 DSH profile 添加 Alertmanager 驱动的只读 AIOps 工作流。它挂载专用 webhook listener、带持久队列/冷却/资源预算的通用 fingerprint router、随包发布的 `aiops-diag` skill、三个观测 Provider、七个观测工具、报告与反馈写入工具、五个工作区范围历史/审计工具，以及 Web Portal。随附 profile 默认都不包含它。启动需要 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`；服务端点与 kubeconfig 路径可以通过环境默认值提供，也可以在 Portal 中实时保存。Kubernetes 读取需要只读集群凭据，但不再要求 kubectl。
 
 ## 目录
 
@@ -52,9 +52,9 @@ plugin 命令会把本包及其依赖协调到 profile，并激活其声明的 `
 
 ### 获得的能力
 
-该层插入通用 webhook runtime、确定性 incident router、全局注册的 `k8s-diag` 指令、隔离 Alertmanager listener、三个观测 Provider、观测/报告/反馈/历史工具，以及只读 `AIOps` Web 标签。`AIOPS_WORKSPACE` 选择诊断 Workspace 与 Portal 的固定服务端范围。Bundle 把路由状态、队列与审计保存在 Harness home 下的 `aiops-router.sqlite`，把可丢弃历史索引保存在 `aiops-incidents.sqlite`。默认风暴策略包含 60 秒 fingerprint 冷却、100 项/15 分钟队列、3 次尝试、全局 4 个在途 turn，以及 severity 并发/Token 预留上限。
+该层插入通用 webhook runtime、确定性 incident router、全局注册的 `aiops-diag` 指令、隔离 Alertmanager listener、三个观测 Provider、观测/报告/反馈/历史工具，以及只读 `AIOps` Web 标签。Router 接收除显式噪声配置以外的所有 alertname，并在来源 severity 缺失或未知时使用默认值。`AIOPS_WORKSPACE` 选择诊断 Workspace 与 Portal 的固定服务端范围。Bundle 把路由状态、队列与审计保存在 Harness home 下的 `aiops-router.sqlite`，把可丢弃历史索引保存在 `aiops-incidents.sqlite`。默认风暴策略包含 60 秒 fingerprint 冷却、100 项/15 分钟队列、3 次尝试、全局 4 个在途 turn，以及 severity 并发/Token 预留上限。
 
-Alertmanager webhook receiver 需要发送带 `Authorization: Bearer <secret>` 的 JSON。可选的 `X-DSH-Delivery-ID` 提供由发送方控制的重试 identity；未提供时使用已认证请求体摘要。随附策略接受 [`cordis.patch.yml`](cordis.patch.yml) 中列出的高信号 alertname，映射 severity，并应用分级模型与风暴控制预算；后续 profile patch 可以替换这些策略值。
+Alertmanager webhook receiver 需要发送带 `Authorization: Bearer <secret>` 的 JSON。可选的 `X-DSH-Delivery-ID` 提供由发送方控制的重试 identity；未提供时使用已认证请求体摘要。随附策略接受除显式噪声排除项以外的任意 alertname，归一化已知 severity label，并为未知或缺失值使用配置的默认 severity，同时应用分级模型与风暴控制预算；后续 profile patch 可以替换这些策略值。
 
 -----
 
@@ -95,7 +95,7 @@ Alertmanager webhook receiver 需要发送带 `Authorization: Bearer <secret>` �
 <a id="model-experience"></a>
 ## 模型体验
 
-通过本 patch 层插入的 `k8s-diag` skill、观测、事件与事件历史包间接生效；这些包负责指令、工具 schema 与结果。
+通过本 patch 层插入的 `aiops-diag` skill、观测、事件与事件历史包间接生效；这些包负责指令、工具 schema 与结果。
 
 #### KV 缓存影响
 

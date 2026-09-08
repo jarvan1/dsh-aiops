@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-`dsh-aiops` is an independently built DSH bundle for Alertmanager-driven, read-only Kubernetes incident diagnosis. It provides authenticated webhook ingress, fingerprint-to-Session routing with a durable queue and resource budgets, alert-time query windows, a packaged `k8s-diag` skill, Alertmanager, Prometheus, and Kubernetes observation capabilities, structured incident reports, append-only operator feedback, workspace-scoped history/routing audit, and a dedicated AIOps Portal inside DSH Web.
+`dsh-aiops` is an independently built DSH bundle for Alertmanager-driven, read-only incident diagnosis. It provides authenticated webhook ingress, general fingerprint-to-Session routing with a durable queue and resource budgets, alert-time query windows, a packaged `aiops-diag` skill, dynamically selected Alertmanager, Prometheus, and Kubernetes observation capabilities, structured incident reports, append-only operator feedback, workspace-scoped history/routing audit, and a dedicated AIOps Portal inside DSH Web.
 
 ## Compatibility and installation
 
@@ -52,10 +52,10 @@ For local development, install the bundle into a DSH profile from the checked-ou
 DSH_HOME=/path/to/profile-home pnpm dsh plugin --profile web add link:/path/to/dsh-aiops/packages/aiops
 ```
 
-The GitHub installation uses the repository root bundle and relative built plugin entries. A future registry deployment can install `@deepseek-ai/dsh-aiops`; both forms add the AIOps patch after the profile's base and application layers. `PROMETHEUS_URL`, `ALERTMANAGER_URL`, `KUBECONFIG`, and `KUBERNETES_CONTEXT` provide optional composition defaults and can be saved or overridden live in the AIOps data-source settings. `AIOPS_WORKSPACE` and the `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` credential configure the automated workflow. The webhook listener defaults to `127.0.0.1:3081/alertmanager`; Kubernetes uses the official Node client and read-only kubeconfig credentials, without requiring `kubectl`.
+The GitHub installation uses the repository root bundle and relative built plugin entries. A future registry deployment can install `@deepseek-ai/dsh-aiops`; both forms add the AIOps patch after the profile's base and application layers. `PROMETHEUS_URL`, `ALERTMANAGER_URL`, `KUBECONFIG`, and `KUBERNETES_CONTEXT` provide optional composition defaults and can be saved or overridden live in the AIOps data-source settings. `AIOPS_WORKSPACE` and the `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` credential configure the automated workflow. The webhook listener defaults to `127.0.0.1:3081/alertmanager`; set `AIOPS_WEBHOOK_PUBLIC_URL` to the address Alertmanager should use when that loopback address is not reachable. Kubernetes uses the official Node client and read-only kubeconfig credentials, without requiring `kubectl`.
 
 In a Web profile, use the persistent `AIOps` action in the sidebar footer to open the global Portal from any screen. A non-blank Session also exposes the existing `AIOps` conversation view. The Portal always reads `AIOPS_WORKSPACE`; it does not widen scope based on the currently selected chat Session. Prometheus/Alertmanager URLs and the server-side kubeconfig path/context are persisted in DSH user settings and apply live. All three sources must pass connectivity tests; Kubernetes also verifies the minimum read-only RBAC capabilities.
 
-See [the AIOps subsystem guide](docs/aiops.md) for the delivery lifecycle and [the roadmap](docs/roadmap.md) for completed and upcoming stages.
+See [the AIOps subsystem guide](docs/aiops.md) for the delivery lifecycle, [the roadmap](docs/roadmap.md) for completed and upcoming stages, [the changelog](CHANGELOG.md) for notable changes, and [the Codex handoff](CODEX_HANDOFF.md) for the exact working-tree state and continuation checklist.
 
 The main DSH repository remains the source of generic Session, query, workflow, permission, and runtime capabilities. This repository owns only the AIOps domain packages and bundle.

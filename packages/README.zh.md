@@ -36,7 +36,7 @@ kind: "package-group"
 | [`aiops-portal/`](aiops-portal/README.zh.md) | Web 内只读事件概览、筛选、详情与路由审计 | `conversation.view`、`/api/aiops/portal` |
 | [`webhook-alertmanager/`](webhook-alertmanager/README.zh.md) | Bearer 认证、有界的 Alertmanager v4 HTTP adapter | `ctx.webhookRuntime.dispatch()` |
 | [`incident-router/`](incident-router/README.zh.md) | fingerprint 轮次、重放防护、持久队列、风暴控制与确定性 Session 生命周期 | `ctx.aiopsIncidentRouter` |
-| [`skill-k8s-diag/`](skill-k8s-diag/README.zh.md) | 跨 Workspace 可用的版本化告警时间锚 Kubernetes 诊断流程 | `k8s-diag` skill |
+| [`skill-k8s-diag/`](skill-k8s-diag/README.zh.md) | 跨 Workspace 可用的版本化通用告警时间锚诊断流程；包路径因兼容性保留 | `aiops-diag` skill |
 | [`aiops/`](aiops/README.zh.md) | 包含运行时行并启用派生索引的可安装 profile patch | `dsh.bundle.patch` |
 
 <a id="related-documentation"></a>

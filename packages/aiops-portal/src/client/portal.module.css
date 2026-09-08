@@ -132,6 +132,9 @@
 .endpointCard input[aria-invalid="true"] { border-color: var(--portal-critical); }
 .testRow { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; color: var(--dsw-alias-label-tertiary); font-size: 13px; }
 .testRow button { flex: none; }
+.secretRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.secretRow button { min-width: 82px; }
+.webhookHint { color: var(--dsw-alias-label-tertiary); font-size: 13px; line-height: 20px; }
 .testPassed { color: #52a56f; }
 .testFailed { color: var(--portal-critical); }
 .settingsFooter { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; padding-top: 18px; }

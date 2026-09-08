@@ -104,7 +104,10 @@ const config = {
   workspacePath: '/workspace',
   agentPreset: 'standard',
   permissionPreset: 'read-only',
-  alertnameAllowlist: ['KubePodCrashLooping'],
+  routingPolicy: {
+    ignoredAlertnames: ['Watchdog', 'InfoInhibitor'],
+    defaultSeverity: 'warning',
+  },
   severityMap: { critical: 'critical', warning: 'warning' },
   modelBudgets: { info: 1000, warning: 2000, critical: 3000 },
   stormControl: {
@@ -126,7 +129,7 @@ const config = {
   },
 } satisfies Config
 
-function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: Config } = {}): {
+function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: Config; locale?: string } = {}): {
   ctx: Context
   rule: () => WebhookRule<'alertmanager'>
   agents: Map<string, FakeAgent>
@@ -165,6 +168,11 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
   ctx.provide('permissionPresets', { resolve: vi.fn(), set: vi.fn() } as never)
   ctx.provide('sessionPersistence', {
     stat: async (id: string) => options.persisted ? { id, revision: 'r1' } : undefined,
+  } as never)
+  ctx.provide('settings', {
+    get: (namespace: string) => namespace === 'locale'
+      ? options.locale === undefined ? {} : { preference: options.locale }
+      : undefined,
   } as never)
   ctx.provide('sessions', { flush: async () => true } as never)
   ctx.provide('sessionTitle', { rename: vi.fn() } as never)
@@ -216,8 +224,19 @@ describe('AIOps incident router', () => {
         kubernetesLogs: { since_time: '2026-09-06T00:45:00.000Z', tail_lines: 1000, timestamps: true },
       },
     })
-    expect(JSON.stringify(agent?.followups[0])).toContain('Load and follow the k8s-diag skill')
+    expect(JSON.stringify(agent?.followups[0])).toContain('Load and follow the aiops-diag skill')
+    expect(JSON.stringify(agent?.followups[0])).toContain('Kubernetes is optional, not assumed')
     expect(JSON.stringify(agent?.followups[0])).toContain('2026-09-06T01:00:00.000Z')
+    expect(JSON.stringify(agent?.followups[0])).toContain('English (en)')
+  })
+
+  it('uses the current DSH locale preference for model output and persisted report text', async () => {
+    const test = harness({ locale: 'zh' })
+    await test.rule().run(delivery('zh-locale'), new AbortController().signal)
+    const [agent] = [...test.agents.values()]
+    const prompt = JSON.stringify(agent?.followups[0])
+    expect(prompt).toContain('Simplified Chinese (zh)')
+    expect(prompt).toContain('user-facing narrative and persisted incident-report text')
   })
 
   it('suppresses an exact delivery replay after the route event is durable', async () => {
@@ -254,18 +273,39 @@ describe('AIOps incident router', () => {
     expect([...test.agents.keys()][0]).not.toBe([...test.agents.keys()][1])
   })
 
-  it('filters alertname and severity misses without creating a Session', async () => {
+  it('ignores configured noise while routing arbitrary alerts with fallback severity', async () => {
     const test = harness()
     const signal = new AbortController().signal
-    await test.rule().run(delivery('low-name', 'firing', alert('firing', {
+    await test.rule().run(delivery('ignored-name', 'firing', alert('firing', {
       labels: { alertname: 'Watchdog', severity: 'critical' },
       fingerprint: '1111111111111111',
     })), signal)
-    await test.rule().run(delivery('low-severity', 'firing', alert('firing', {
-      labels: { alertname: 'KubePodCrashLooping', severity: 'notice' },
+    await test.rule().run(delivery('custom-severity', 'firing', alert('firing', {
+      labels: { alertname: 'DatabaseReplicationLag', severity: 'vendor-unknown' },
       fingerprint: '2222222222222222',
     })), signal)
-    expect(test.create).not.toHaveBeenCalled()
+    await test.rule().run(delivery('missing-severity', 'firing', alert('firing', {
+      labels: { alertname: 'ExternalApiUnavailable' },
+      fingerprint: '3333333333333333',
+    })), signal)
+    expect(test.create).toHaveBeenCalledTimes(2)
+    expect(test.router.listControlAudit({ limit: 20, outcome: 'filtered' }))
+      .toEqual([expect.objectContaining({ deliveryId: 'ignored-name', reason: 'alertname-ignored' })])
+    const routed = [...test.agents.values()].flatMap(agent => agent.events)
+      .filter(event => event.type === 'aiops/alert-routed')
+    expect(routed).toHaveLength(2)
+    expect(routed.every(event => event.type === 'aiops/alert-routed' && event.data.severity === 'warning')).toBe(true)
+  })
+
+  it('matches configured severity labels case-insensitively', async () => {
+    const test = harness()
+    await test.rule().run(delivery('uppercase-severity', 'firing', alert('firing', {
+      labels: { alertname: 'CustomCriticalAlert', severity: 'CRITICAL' },
+      fingerprint: '4444444444444444',
+    })), new AbortController().signal)
+    const [agent] = [...test.agents.values()]
+    const routed = agent?.events.find(event => event.type === 'aiops/alert-routed')
+    expect(routed?.type === 'aiops/alert-routed' ? routed.data.severity : undefined).toBe('critical')
   })
 
   it('resumes a persisted deterministic Session after restart-style absence from the live registry', async () => {

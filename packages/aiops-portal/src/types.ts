@@ -3,6 +3,14 @@ import type { RouteAuditOutcome, RouteAuditRecord } from '@deepseek-ai/dsh-aiops
 
 export const PORTAL_API_PATH = '/api/aiops/portal'
 export const PORTAL_CONNECTION_TEST_API_PATH = '/api/aiops/portal/connections/test'
+export const PORTAL_WEBHOOK_CONFIGURATION_API_PATH = '/api/aiops/portal/webhook-configuration'
+
+export interface WebhookConfiguration {
+  readonly version: 1
+  readonly url: string
+  readonly secretConfigured: boolean
+  readonly secret?: string
+}
 
 export type ConnectionTarget = 'prometheus' | 'alertmanager' | 'kubernetes'
 

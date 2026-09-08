@@ -311,7 +311,7 @@ export class IncidentRouteStore {
     readonly deliveryId: string
     readonly payloadDigest: string
     readonly alert: AlertmanagerAlert
-    readonly reason: 'alertname-not-allowed' | 'severity-not-mapped'
+    readonly reason: 'alertname-ignored'
     readonly receivedAt: number
   }): void {
     const prior = this.db.prepare(`

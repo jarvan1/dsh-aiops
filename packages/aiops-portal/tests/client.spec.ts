@@ -83,6 +83,12 @@ describe('AIOps Portal client registration', () => {
     const testConnection = vi.fn(async (request: { target: string }) => request.target === 'kubernetes'
       ? { ok: true, latencyMs: 3, kubernetes: { context: 'prod', cluster: 'prod', namespace: 'default', server: 'https://cluster' } } as const
       : { ok: true, latencyMs: 3 } as const)
+    const loadWebhookConfiguration = vi.fn(async (revealSecret: boolean) => ({
+      version: 1 as const,
+      url: 'http://dsh-host:3081/alertmanager',
+      secretConfigured: true,
+      ...(revealSecret ? { secret: 'test-secret' } : {}),
+    }))
     const t = (key: string, params?: Record<string, unknown>) => params === undefined
       ? key : `${key}:${Object.values(params).join(',')}`
     const container = document.createElement('div')
@@ -92,6 +98,7 @@ describe('AIOps Portal client registration', () => {
         prometheusSettings: prometheusSettings as never,
         alertmanagerSettings: alertmanagerSettings as never,
         kubernetesSettings: kubernetesSettings as never,
+        loadWebhookConfiguration,
         testConnection,
         t: t as never,
       }))
@@ -109,6 +116,14 @@ describe('AIOps Portal client registration', () => {
     const button = (label: string) => [...container.querySelectorAll('button')]
       .find(value => value.textContent === label) as HTMLButtonElement
     expect(button('save').disabled).toBe(true)
+    expect(loadWebhookConfiguration).toHaveBeenCalledWith(false, expect.any(AbortSignal))
+    expect((container.querySelector('#aiops-webhook-url') as HTMLInputElement).value).toBe('http://dsh-host:3081/alertmanager')
+
+    await act(async () => { button('showSecret').click() })
+    expect(loadWebhookConfiguration).toHaveBeenCalledWith(true)
+    expect((container.querySelector('#aiops-webhook-secret') as HTMLInputElement).value).toBe('test-secret')
+    await act(async () => { button('hideSecret').click() })
+    expect((container.querySelector('#aiops-webhook-secret') as HTMLInputElement).value).toBe('')
 
     await act(async () => {
       const tests = [...container.querySelectorAll('button')].filter(value => value.textContent === 'testConnection')

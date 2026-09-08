@@ -12,7 +12,7 @@ An Alertmanager notification contains `startsAt`, but Stage C exposed it only as
 - The window begins at T0 minus the configured lookback. It ends at delivery receipt, clamped between T0 and the configured post-alert horizon. This avoids future queries and prevents delayed notifications from widening without bound.
 - The event includes tool-shaped parameters for Prometheus range queries, Kubernetes Events, and Pod logs. The identical object is present in the model-visible follow-up and survives Session replay.
 - Kubernetes Event reads accept inclusive absolute bounds and retain Events whose occurrence intervals overlap the window. Pod-log reads accept an absolute lower bound; an upper bound forces timestamps and removes later or undated lines locally because Kubernetes exposes no server-side log end time.
-- `k8s-diag` is a versioned `SKILL.md` packaged in `@deepseek-ai/dsh-aiops-skill-k8s-diag`. Its plugin registers the instructions in the global DSH skill layer, so they remain available when the diagnostic Workspace changes.
+- `aiops-diag` is a versioned `SKILL.md` packaged in the compatibility-named `@deepseek-ai/dsh-aiops-skill-k8s-diag`. Its plugin registers the instructions in the global DSH skill layer, so they remain available when the diagnostic Workspace changes.
 - The skill permits read-only evidence collection only, requires evidence-linked hypotheses and a complete `aiops_incident_report`, and covers the initial high-signal alert scenarios.
 
 ## Consequences

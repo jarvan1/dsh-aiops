@@ -1,6 +1,6 @@
 {
   "name": "dsh-aiops",
-  "description": "Git-installable DSH bundle for read-only Kubernetes incident diagnosis",
+  "description": "Git-installable DSH bundle for general read-only incident diagnosis",
   "version": "0.1.2-rc.1",
   "type": "module",
   "main": "packages/aiops/lib/index.js",

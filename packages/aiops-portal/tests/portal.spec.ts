@@ -1,11 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { readFile } from 'node:fs/promises'
+import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import { filterPortalIncidents } from '../src/client/model.ts'
 import { testEndpointConnection } from '../src/connectivity.ts'
 import { apply, testPortalConnection } from '../src/index.ts'
 import { readPortalSnapshot, summarizePortal } from '../src/snapshot.ts'
-import { PORTAL_API_PATH, PORTAL_CONNECTION_TEST_API_PATH, type PortalIncident } from '../src/types.ts'
+import { PORTAL_API_PATH, PORTAL_CONNECTION_TEST_API_PATH, PORTAL_WEBHOOK_CONFIGURATION_API_PATH, type PortalIncident } from '../src/types.ts'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 
 function incident(overrides: Partial<PortalIncident> = {}): PortalIncident {
@@ -45,13 +46,15 @@ describe('AIOps Portal read model', () => {
       webServer: { register: (next: WebRoute) => { routes.push(next); return dispose } },
       sessionQuery: { filterSessions: query },
       aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
+      credentials: { resolve: vi.fn(async () => ({ value: 'portal-test-secret' })) },
       logger: { warn: vi.fn() },
     }
     ctx.inject = (_services: string[], mount: (value: unknown) => void) => mount(ctx)
-    apply(ctx as never, {})
+    apply(ctx as never, { webhookUrl: 'https://dsh.example.test:3081/alertmanager' })
     const route = routes.find(value => value.path === PORTAL_API_PATH)
     expect(route).toMatchObject({ kind: 'exact', path: PORTAL_API_PATH })
     expect(routes).toContainEqual(expect.objectContaining({ kind: 'exact', path: PORTAL_CONNECTION_TEST_API_PATH }))
+    expect(routes).toContainEqual(expect.objectContaining({ kind: 'exact', path: PORTAL_WEBHOOK_CONFIGURATION_API_PATH }))
     const req = Object.assign(new EventEmitter(), { method: 'POST' })
     const headers = new Map<string, unknown>()
     const res = {
@@ -64,6 +67,52 @@ describe('AIOps Portal read model', () => {
     expect(res.statusCode).toBe(405)
     expect(headers.get('allow')).toBe('GET, HEAD')
     expect(query).not.toHaveBeenCalled()
+  })
+
+  it('reveals the webhook secret only when explicitly requested', async () => {
+    const routes: WebRoute[] = []
+    const resolve = vi.fn(async () => ({ value: 'portal-test-secret' }))
+    const ctx: Record<string, unknown> = {
+      effect: (setup: () => () => void) => { setup() },
+      webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
+      sessionQuery: {},
+      aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
+      kubernetes: {},
+      credentials: { resolve },
+      logger: { warn: vi.fn() },
+    }
+    ctx.inject = (_services: string[], mount: (value: unknown) => void) => mount(ctx)
+    apply(ctx as never, {
+      webhookUrl: 'https://dsh.example.test:3081/alertmanager',
+      webhookSecretRef: 'AIOPS_ALERTMANAGER_WEBHOOK_SECRET',
+    })
+    const route = routes.find(value => value.path === PORTAL_WEBHOOK_CONFIGURATION_API_PATH)
+    const request = async (revealSecret: boolean) => {
+      const req = Object.assign(Readable.from([JSON.stringify({ revealSecret })]), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      })
+      let body = ''
+      const res = {
+        statusCode: 0,
+        setHeader: vi.fn(),
+        end(value?: string) { body = value ?? '' },
+      }
+      await route?.handler(req as never, res as never)
+      return JSON.parse(body) as Record<string, unknown>
+    }
+    await expect(request(false)).resolves.toEqual({
+      version: 1,
+      url: 'https://dsh.example.test:3081/alertmanager',
+      secretConfigured: true,
+    })
+    await expect(request(true)).resolves.toEqual({
+      version: 1,
+      url: 'https://dsh.example.test:3081/alertmanager',
+      secretConfigured: true,
+      secret: 'portal-test-secret',
+    })
+    expect(resolve).toHaveBeenCalledTimes(2)
   })
 
   it('tests the real Prometheus and Alertmanager API shapes without saving settings', async () => {

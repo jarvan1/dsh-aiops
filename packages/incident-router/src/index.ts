@@ -5,10 +5,16 @@ import { isAbsolute } from 'node:path'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
+import {
+  LOCALE_PREFERENCE_FIELD,
+  LOCALE_SETTINGS_NAMESPACE,
+  type LocaleSettings,
+} from '@deepseek-ai/dsh-client-locale'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
+import type {} from '@deepseek-ai/dsh-settings'
 import {
   WebhookDeliveryId,
   WebhookRuleId,
@@ -32,6 +38,8 @@ import type { AiopsAlertRouteEvent, AlertmanagerGroupContext, DiagnosisWindowPol
 export { diagnosisTimeContext } from './diagnosis-window.ts'
 export * from './store.ts'
 export type * from './types.ts'
+
+type IncidentSeverity = 'info' | 'warning' | 'critical'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -68,8 +76,11 @@ export interface Config {
   readonly workspacePath: string
   readonly agentPreset: string
   readonly permissionPreset: string
-  readonly alertnameAllowlist: string[]
-  readonly severityMap: Record<string, 'info' | 'warning' | 'critical'>
+  readonly routingPolicy: {
+    readonly ignoredAlertnames: string[]
+    readonly defaultSeverity: IncidentSeverity
+  }
+  readonly severityMap: Record<string, IncidentSeverity>
   readonly modelBudgets: {
     readonly info: number
     readonly warning: number
@@ -107,7 +118,10 @@ export const Config: z<Config> = z.object({
   workspacePath: z.string().required(),
   agentPreset: z.string().default('standard'),
   permissionPreset: z.string().default('read-only'),
-  alertnameAllowlist: z.array(z.string()).min(1).required(),
+  routingPolicy: z.object({
+    ignoredAlertnames: z.array(z.string()).required(),
+    defaultSeverity: z.union(['info', 'warning', 'critical'] as const).required(),
+  }).required(),
   severityMap: z.dict(z.union(['info', 'warning', 'critical'] as const)).required(),
   modelBudgets: z.object({
     info: budget.required(),
@@ -160,16 +174,22 @@ function assertConfig(config: Config): void {
     throw new Error('incident-router workspacePath must be absolute')
   }
   const alertnames = new Set<string>()
-  for (const alertname of config.alertnameAllowlist) {
+  for (const alertname of config.routingPolicy.ignoredAlertnames) {
     if (alertname === '' || alertname.trim() !== alertname || alertnames.has(alertname)) {
-      throw new Error('incident-router alertnameAllowlist must contain unique non-empty trimmed strings')
+      throw new Error('incident-router routingPolicy.ignoredAlertnames must contain unique non-empty trimmed strings')
     }
     alertnames.add(alertname)
   }
+  const severityLabels = new Set<string>()
   for (const severity of Object.keys(config.severityMap)) {
     if (severity === '' || severity.trim() !== severity) {
       throw new Error('incident-router severityMap keys must be non-empty trimmed strings')
     }
+    const normalized = severity.toLowerCase()
+    if (severityLabels.has(normalized)) {
+      throw new Error('incident-router severityMap keys must be unique when compared case-insensitively')
+    }
+    severityLabels.add(normalized)
   }
   for (const severity of ['info', 'warning', 'critical'] as const) {
     if (config.stormControl.severityConcurrency[severity] > config.stormControl.globalConcurrency) {
@@ -206,15 +226,33 @@ function hasRouteEvent(agent: Agent, source: string, deliveryId: string, fingerp
     && event.data.fingerprint === fingerprint)
 }
 
+/** Read the durable DSH locale preference; English is DSH's Host-side fallback. */
+function outputLocale(ctx: Context): string {
+  const section = ctx.get('settings')?.get(LOCALE_SETTINGS_NAMESPACE) as LocaleSettings | undefined
+  const preference = section?.[LOCALE_PREFERENCE_FIELD]
+  return typeof preference === 'string' && preference !== '' ? preference : 'en'
+}
+
+/** Keep model narrative and persisted report text aligned with the DSH locale. */
+function languageInstruction(locale: string): string {
+  const language = locale === 'zh'
+    ? 'Simplified Chinese (zh)'
+    : locale === 'en'
+      ? 'English (en)'
+      : `the language identified by BCP 47 locale ${JSON.stringify(locale)}`
+  return `Write all user-facing narrative and persisted incident-report text in ${language}, following the current DSH language preference. Preserve identifiers, labels, commands, field names, and observed evidence values verbatim.`
+}
+
 /** Build concise, machine-readable first-turn context. */
-function promptFor(event: AiopsAlertRouteEvent): string {
+function promptFor(event: AiopsAlertRouteEvent, locale: string): string {
   const lifecycle = event.alert.status === 'resolved'
     ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure.'
     : 'Investigate this firing alert with read-only evidence collection.'
   return [
     `AIOps Alertmanager route ${event.decision}, round ${String(event.round)}.`,
     lifecycle,
-    'Load and follow the k8s-diag skill. Use only read-only observation tools. Treat diagnosis as the authoritative alert-time anchor and tool parameter set; do not replace it with a relative "now" window.',
+    languageInstruction(locale),
+    'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use only read-only observation tools. Treat diagnosis as the authoritative alert-time anchor and tool parameter set; do not replace it with a relative "now" window.',
     'Separate facts from hypotheses and persist the complete current report with aiops_incident_report.',
     'Normalized routed alert:',
     JSON.stringify(event, null, 2),
@@ -222,8 +260,8 @@ function promptFor(event: AiopsAlertRouteEvent): string {
 }
 
 /** One grouped turn preserves every normalized event while avoiding repeated model work. */
-function promptForGroup(events: readonly AiopsAlertRouteEvent[]): string {
-  if (events.length === 1 && events[0] !== undefined) return promptFor(events[0])
+function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string): string {
+  if (events.length === 1 && events[0] !== undefined) return promptFor(events[0], locale)
   const latest = events.at(-1)
   if (latest === undefined) throw new Error('incident router cannot prompt an empty route group')
   return [
@@ -231,7 +269,8 @@ function promptForGroup(events: readonly AiopsAlertRouteEvent[]): string {
     latest.alert.status === 'resolved'
       ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure.'
       : 'Investigate the grouped firing alerts with one read-only evidence pass.',
-    'Load and follow the k8s-diag skill. Use the newest diagnosis window below and account for every grouped delivery id. Separate facts from hypotheses and persist one complete current report with aiops_incident_report.',
+    languageInstruction(locale),
+    'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use the newest diagnosis window below and account for every grouped delivery id. Separate facts from hypotheses and persist one complete current report with aiops_incident_report.',
     'Normalized routed alerts, oldest first:',
     JSON.stringify(events, null, 2),
   ].join('\n\n')
@@ -261,7 +300,8 @@ export class AiopsIncidentRouter extends Service {
   static Config = Config
 
   private readonly store: IncidentRouteStore
-  private readonly allowedAlertnames: ReadonlySet<string>
+  private readonly ignoredAlertnames: ReadonlySet<string>
+  private readonly severityByLabel: ReadonlyMap<string, IncidentSeverity>
   private readonly opening = new Map<string, Promise<Agent>>()
   private readonly active = new Map<string, { severity: 'info' | 'warning' | 'critical'; tokens: number }>()
   private readonly lifecycle = new AbortController()
@@ -273,7 +313,10 @@ export class AiopsIncidentRouter extends Service {
     super(ctx, 'aiopsIncidentRouter')
     assertConfig(config)
     this.store = new IncidentRouteStore(config.statePath)
-    this.allowedAlertnames = new Set(config.alertnameAllowlist)
+    this.ignoredAlertnames = new Set(config.routingPolicy.ignoredAlertnames)
+    this.severityByLabel = new Map(
+      Object.entries(config.severityMap).map(([label, severity]) => [label.toLowerCase(), severity]),
+    )
     const disposeRule = ctx.webhookRuntime.register({
       id: WebhookRuleId(config.ruleId),
       kind: 'alertmanager',
@@ -328,30 +371,19 @@ export class AiopsIncidentRouter extends Service {
         continue
       }
       const alertname = alert.labels['alertname'] ?? ''
-      if (!this.allowedAlertnames.has(alertname)) {
+      if (this.ignoredAlertnames.has(alertname)) {
         this.store.recordFiltered({
           source: delivery.source,
           deliveryId: delivery.deliveryId,
           payloadDigest: delivery.event.payloadDigest,
           alert,
-          reason: 'alertname-not-allowed',
+          reason: 'alertname-ignored',
           receivedAt: delivery.receivedAt,
         })
         continue
       }
-      const severityLabel = alert.labels['severity'] ?? ''
-      const severity = this.config.severityMap[severityLabel]
-      if (severity === undefined) {
-        this.store.recordFiltered({
-          source: delivery.source,
-          deliveryId: delivery.deliveryId,
-          payloadDigest: delivery.event.payloadDigest,
-          alert,
-          reason: 'severity-not-mapped',
-          receivedAt: delivery.receivedAt,
-        })
-        continue
-      }
+      const severityLabel = alert.labels['severity']?.trim().toLowerCase() ?? ''
+      const severity = this.severityByLabel.get(severityLabel) ?? this.config.routingPolicy.defaultSeverity
       const now = Date.now()
       const key = this.fingerprintKey(delivery.source, alert.fingerprint)
       const lastDispatch = this.store.lastDispatchAt(delivery.source, alert.fingerprint)
@@ -471,7 +503,7 @@ export class AiopsIncidentRouter extends Service {
         throw new Error(`incident router could not flush Session ${first.route.sessionId}`)
       }
       agent.followup(createUserMessage({
-        content: [{ type: 'text', text: promptForGroup(events) }],
+        content: [{ type: 'text', text: promptForGroup(events, outputLocale(this.ctx)) }],
         source: {
           kind: 'webhook',
           provider: 'alertmanager',
@@ -608,7 +640,7 @@ export class AiopsIncidentRouter extends Service {
       throw new Error(`incident router could not flush Session ${route.sessionId}`)
     }
     agent.followup(createUserMessage({
-      content: [{ type: 'text', text: promptFor(event) }],
+      content: [{ type: 'text', text: promptFor(event, outputLocale(this.ctx)) }],
       source: {
         kind: 'webhook',
         provider: 'alertmanager',

@@ -14,7 +14,7 @@ Alertmanager POST /alertmanager
              -> fingerprint / 告警轮次 router
              -> startsAt 锚点 + 有界绝对查询窗口
              -> 确定性诊断 Session
-             -> 加载 k8s-diag
+             -> 加载 aiops-diag
                               |
 alertmanager_alerts -> ctx.alertmanager -> Alertmanager HTTP API v2
 prometheus_query*   -> ctx.prometheus   -> Prometheus HTTP API
@@ -44,7 +44,7 @@ kubernetes_*        -> ctx.kubernetes   -> 原生 kubeconfig 客户端 -> Kubern
 
 ## 告警路由
 
-Alertmanager adapter 只接受经过认证且有界的 v4 JSON。它会校验 Provider 提供的 fingerprint，缺失时从排序后的 labels 派生。Router 在消耗任何模型资源前应用精确的高信号 alertname 白名单和显式 severity 映射。完全相同的 delivery 重试是幂等的；使用不同认证内容复用发送方提供的 delivery id 会失败。
+Alertmanager adapter 只接受经过认证且有界的 v4 JSON。它会校验 Provider 提供的 fingerprint，缺失时从排序后的 labels 派生。Router 默认接受所有 alertname，仅过滤配置为已知噪声的精确名称。severity label 通过不区分大小写的映射归一化；缺失或未知值使用配置的默认 severity，而不会被丢弃。完全相同的 delivery 重试是幂等的；使用不同认证内容复用发送方提供的 delivery id 会失败。
 
 SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Session ID。符合策略的告警在创建 Agent 前进入持久队列；同 fingerprint/status 的就绪项分组，并受 fingerprint 冷却、队列时效/容量、全局及 severity 并发和在途 Token 预留限制。critical 优先，同 severity 保持 FIFO；重启会恢复处理中工作。每次过滤、延迟、分组、丢弃、启动、完成与失败都有审计。
 
@@ -58,7 +58,7 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 | Alertmanager 告警 | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.zh.md)、`ctx.alertmanager`、HTTP API v2 | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `alertmanager_alerts` |
 | Prometheus 查询 | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.zh.md)、`ctx.prometheus`、HTTP 查询 API | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `prometheus_query`、`prometheus_query_range` |
 | Kubernetes 读取 | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.zh.md)、`ctx.kubernetes`、官方原生 API 客户端（另有可选 kubectl 兼容子路径） | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `kubernetes_get`、`kubernetes_list`、`kubernetes_events`、`kubernetes_logs` |
-| 诊断流程 | 全局注册的随包 [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.zh.md) | 每个被路由诊断 Session 加载的 `k8s-diag` |
+| 诊断流程 | 全局注册的随包 [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.zh.md) | `aiops-diag` 动态选择 Alertmanager、Prometheus、服务与 Kubernetes 证据分支 |
 | 运维 Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.zh.md)、固定同源 `/api/aiops/portal` | DSH Web 常驻侧边栏入口、Session 视图与实时数据源设置 |
 
 每个 capability 都把 Service Definition 与当前 Provider 合并在一个包中，因为它们目前作为同一关注点演进。出现第二种传输或远程执行 Provider 时再拆分 Provider 包；Consumer 已经只依赖抽象 Service。

@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-`dsh-aiops` 是独立构建的、由 Alertmanager 驱动的 DSH 只读 Kubernetes 事件诊断 bundle，提供认证 webhook 入口、带持久队列和资源预算的 fingerprint 到 Session 路由、告警时间锚查询窗口、随包发布的 `k8s-diag` skill、Alertmanager、Prometheus 与 Kubernetes 观测能力、结构化事件报告、追加式值班反馈、工作区范围历史/路由审计，以及 DSH Web 内的专用 AIOps Portal。
+`dsh-aiops` 是独立构建的、由 Alertmanager 驱动的 DSH 通用只读事件诊断 bundle，提供认证 webhook 入口、带持久队列和资源预算的 fingerprint 到 Session 路由、告警时间锚查询窗口、随包发布的 `aiops-diag` skill、动态选择的 Alertmanager、Prometheus 与 Kubernetes 观测能力、结构化事件报告、追加式值班反馈、工作区范围历史/路由审计，以及 DSH Web 内的专用 AIOps Portal。
 
 ## 兼容版本与安装
 
@@ -52,10 +52,10 @@ pnpm run pack:bundle
 DSH_HOME=/path/to/profile-home pnpm dsh plugin --profile web add link:/path/to/dsh-aiops/packages/aiops
 ```
 
-GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可以从 registry 安装 `@deepseek-ai/dsh-aiops`。两种形式都会把 AIOps patch 添加到 profile 的 base 与应用层之后。`PROMETHEUS_URL`、`ALERTMANAGER_URL`、`KUBECONFIG` 和 `KUBERNETES_CONTEXT` 是可选的组合层默认值，也可以在 AIOps 数据源设置中实时保存或覆盖；`AIOPS_WORKSPACE` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` 凭据用于配置自动化工作流。Webhook listener 默认位于 `127.0.0.1:3081/alertmanager`；Kubernetes 使用官方 Node 客户端和部署侧只读 kubeconfig 凭据，不要求安装 `kubectl`。
+GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可以从 registry 安装 `@deepseek-ai/dsh-aiops`。两种形式都会把 AIOps patch 添加到 profile 的 base 与应用层之后。`PROMETHEUS_URL`、`ALERTMANAGER_URL`、`KUBECONFIG` 和 `KUBERNETES_CONTEXT` 是可选的组合层默认值，也可以在 AIOps 数据源设置中实时保存或覆盖；`AIOPS_WORKSPACE` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` 凭据用于配置自动化工作流。Webhook listener 默认位于 `127.0.0.1:3081/alertmanager`；当 Alertmanager 无法访问该回环地址时，用 `AIOPS_WEBHOOK_PUBLIC_URL` 设置它应使用的地址。Kubernetes 使用官方 Node 客户端和部署侧只读 kubeconfig 凭据，不要求安装 `kubectl`。
 
 在 Web profile 中，左侧栏底部始终显示 `AIOps` 入口，可以从任意页面打开全局 Portal；非空 Session 中仍保留 `AIOps` 会话标签。Portal 固定读取 `AIOPS_WORKSPACE`，不会以当前聊天 Session 的工作区扩大查询范围。Prometheus/Alertmanager URL 以及服务端 kubeconfig 路径/context 会写入 DSH 用户设置并立即生效。三个数据源都必须通过连通性测试，Kubernetes 还会验证最低只读 RBAC 权限。
 
-Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，已完成与后续阶段见 [路线图](docs/roadmap.zh.md)。
+Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，已完成与后续阶段见 [路线图](docs/roadmap.zh.md)，重要变更见 [Changelog](CHANGELOG.md)，当前工作树状态和新 Codex 接续清单见 [Codex 交接文档](CODEX_HANDOFF.md)。
 
 DSH 主仓库继续拥有通用 Session、查询、Workflow、权限与运行时能力。本仓库只拥有 AIOps 领域包和 bundle。

@@ -16,7 +16,7 @@ function OpsIcon() {
 }
 
 export function AIOpsSidebarAction({
-  wide, loadSnapshot, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t,
+  wide, loadSnapshot, loadWebhookConfiguration, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t,
 }: Props) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement | null>(null)
@@ -55,6 +55,7 @@ export function AIOpsSidebarAction({
       <div className={css.globalPanel} role="dialog" aria-modal="true" aria-label={t('title')}>
         <PortalDashboard
           loadSnapshot={loadSnapshot}
+          loadWebhookConfiguration={loadWebhookConfiguration}
           testConnection={testConnection}
           prometheusSettings={prometheusSettings}
           alertmanagerSettings={alertmanagerSettings}

@@ -26,21 +26,23 @@
         workspacePath: !!js process.env.AIOPS_WORKSPACE || process.cwd()
         agentPreset: standard
         permissionPreset: read-only
-        alertnameAllowlist:
-          - KubePodCrashLooping
-          - KubeNodeNotReady
-          - KubePodNotReady
-          - KubeDeploymentReplicasMismatch
-          - KubeStatefulSetReplicasMismatch
-          - KubePersistentVolumeFillingUp
-          - KubePersistentVolumeErrors
-          - TargetDown
-          - HighErrorRate
-          - HighLatency
+        # Route every alert by default. Keep this list limited to known noise
+        # that should never open a diagnostic Session.
+        routingPolicy:
+          ignoredAlertnames:
+            - Watchdog
+            - InfoInhibitor
+          defaultSeverity: warning
         severityMap:
+          debug: info
           info: info
+          notice: info
+          warn: warning
           warning: warning
+          error: critical
           critical: critical
+          fatal: critical
+          page: critical
         modelBudgets:
           info: 2048
           warning: 4096
@@ -137,3 +139,5 @@
         maxIncidents: 100
         maxAuditRecords: 250
         maxScanSessions: 500
+        webhookUrl: !!js process.env.AIOPS_WEBHOOK_PUBLIC_URL || 'http://127.0.0.1:3081/alertmanager'
+        webhookSecretRef: AIOPS_ALERTMANAGER_WEBHOOK_SECRET

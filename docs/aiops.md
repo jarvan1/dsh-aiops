@@ -14,7 +14,7 @@ Alertmanager POST /alertmanager
              -> fingerprint / alert-round router
              -> startsAt anchor + bounded absolute query window
              -> deterministic diagnostic Session
-             -> load k8s-diag
+             -> load aiops-diag
                               |
 alertmanager_alerts -> ctx.alertmanager -> Alertmanager HTTP API v2
 prometheus_query*   -> ctx.prometheus   -> Prometheus HTTP API
@@ -44,7 +44,7 @@ Observation tools return bounded canonical JSON or exact bounded log text and ne
 
 ## Alert routing
 
-The Alertmanager adapter accepts only authenticated, bounded v4 JSON. It validates supplied fingerprints or derives one from sorted labels. The router applies an exact high-signal alertname allowlist and an explicit severity mapping before any model spend. An exact delivery retry is idempotent, and reuse of a sender-supplied delivery id with different authenticated bytes fails.
+The Alertmanager adapter accepts only authenticated, bounded v4 JSON. It validates supplied fingerprints or derives one from sorted labels. The router accepts every alert name by default and filters only exact names configured as known noise. Severity labels are normalized through a case-insensitive map; missing or unknown values use the configured default severity instead of being discarded. An exact delivery retry is idempotent, and reuse of a sender-supplied delivery id with different authenticated bytes fails.
 
 SQLite maps `(source, fingerprint)` to the current alert round and deterministic Session ID. Policy-eligible alerts enter a durable queue before Agent creation. Ready items with the same fingerprint/status are grouped and constrained by fingerprint cooldown, queue age/capacity, global/per-severity concurrency, and in-flight token reservations. Critical work has priority, equal severity remains FIFO, and restart recovers processing work. Every filtered, deferred, grouped, dropped, started, completed, and failed transition is audited.
 
@@ -58,7 +58,7 @@ The first firing creates round 1; repeated firing and resolved notifications app
 | Alertmanager alerts | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.md), `ctx.alertmanager`, HTTP API v2 | `alertmanager_alerts` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Prometheus query | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.md), `ctx.prometheus`, HTTP query API | `prometheus_query`, `prometheus_query_range` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Kubernetes read | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.md), `ctx.kubernetes`, official native API client (optional kubectl compatibility subpath) | `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, `kubernetes_logs` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
-| Diagnostic workflow | Packaged [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.md), registered globally | `k8s-diag` loaded by each routed diagnostic Session |
+| Diagnostic workflow | Packaged [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.md), registered globally | `aiops-diag` dynamically selects Alertmanager, Prometheus, service, and Kubernetes evidence branches |
 | Operations Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.md), fixed same-origin `/api/aiops/portal` | Persistent DSH Web sidebar action, Session view, and live data-source settings |
 
 Each capability combines its Service Definition and current Provider in one package because they currently evolve as one concern. A second transport or remote execution provider is the trigger to split Provider packages; the Consumer already depends only on the abstract Service.

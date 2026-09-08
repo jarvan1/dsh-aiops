@@ -2,6 +2,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-aiops-incident-router'
 import { KubernetesQueryError } from '@deepseek-ai/dsh-aiops-kubernetes'
+import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-session-query'
 import z from '@deepseek-ai/schemastery'
@@ -9,6 +10,7 @@ import { testEndpointConnection } from './connectivity.ts'
 import {
   PORTAL_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
+  PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
   type ConnectionTestRequest,
   type ConnectionTestResult,
 } from './types.ts'
@@ -19,18 +21,22 @@ export * from './snapshot.ts'
 export * from './types.ts'
 
 export const name = 'aiops-portal'
-export const inject = ['sessionQuery', 'aiopsIncidentRouter', 'kubernetes']
+export const inject = ['sessionQuery', 'aiopsIncidentRouter', 'kubernetes', 'credentials']
 
 export interface Config {
   readonly maxIncidents?: number
   readonly maxAuditRecords?: number
   readonly maxScanSessions?: number
+  readonly webhookUrl?: string
+  readonly webhookSecretRef?: string
 }
 
 export const Config: z<Config> = z.object({
   maxIncidents: z.number().step(1).min(1).max(500).default(100),
   maxAuditRecords: z.number().step(1).min(1).max(1000).default(250),
   maxScanSessions: z.number().step(1).min(1).max(5000).default(500),
+  webhookUrl: z.string().default('http://127.0.0.1:3081/alertmanager'),
+  webhookSecretRef: z.string().role('credential-ref').default('AIOPS_ALERTMANAGER_WEBHOOK_SECRET'),
 })
 
 function limitsOf(config: Config): PortalLimits {
@@ -89,6 +95,12 @@ function connectionRequest(value: unknown): ConnectionTestRequest | undefined {
   return { target, ...(kubeconfig === undefined ? {} : { kubeconfig }), ...(context === undefined ? {} : { context }) }
 }
 
+function revealSecretRequest(value: unknown): boolean | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const revealSecret = Reflect.get(value, 'revealSecret')
+  return typeof revealSecret === 'boolean' ? revealSecret : undefined
+}
+
 export async function testPortalConnection(ctx: Context, request: ConnectionTestRequest, signal: AbortSignal): Promise<ConnectionTestResult> {
   if (request.target !== 'kubernetes') return testEndpointConnection(request.target, request.baseUrl, signal)
   const started = performance.now()
@@ -116,6 +128,8 @@ export async function testPortalConnection(ctx: Context, request: ConnectionTest
 /** Register the same-origin snapshot endpoint consumed by the browser client module. */
 export function apply(ctx: Context, config: Config): void {
   const limits = limitsOf(config)
+  const webhookUrl = config.webhookUrl ?? 'http://127.0.0.1:3081/alertmanager'
+  const webhookSecretRef = credentialRef(config.webhookSecretRef ?? 'AIOPS_ALERTMANAGER_WEBHOOK_SECRET')
   ctx.inject(['webServer'], (webCtx) => {
     webCtx.effect(() => webCtx.webServer.register({
     kind: 'exact',
@@ -173,5 +187,35 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), `aiops-portal: ${PORTAL_CONNECTION_TEST_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
+      async handler(req, res) {
+        if (req.method !== 'POST') {
+          res.setHeader('allow', 'POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        try {
+          const revealSecret = revealSecretRequest(await readJsonBody(req))
+          if (revealSecret === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          const credential = await webCtx.credentials.resolve(webhookSecretRef)
+          const secret = credential?.value
+          json(res, 200, {
+            version: 1,
+            url: webhookUrl,
+            secretConfigured: secret !== undefined && secret !== '',
+            ...(revealSecret && secret !== undefined && secret !== '' ? { secret } : {}),
+          }, false)
+        } catch (error: unknown) {
+          const code = error instanceof Error ? error.message : 'invalid_request'
+          const status = code === 'unsupported_media_type' ? 415 : code === 'request_too_large' ? 413 : 400
+          json(res, status, { error: code }, false)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_WEBHOOK_CONFIGURATION_API_PATH}`)
   })
 }

@@ -5,7 +5,7 @@ import type { SkillRegistration } from '@deepseek-ai/dsh-skill'
 import { describe, expect, it, vi } from 'vitest'
 import { apply, SKILL_DESCRIPTION, SKILL_NAME } from '../src/index.ts'
 
-describe('packaged k8s-diag skill', () => {
+describe('packaged aiops-diag skill', () => {
   it('registers the validated SKILL.md body as a globally available skill', () => {
     const ctx = new Context()
     const register = vi.fn((_skill: SkillRegistration) => () => {})
@@ -24,7 +24,9 @@ describe('packaged k8s-diag skill', () => {
     expect(registration?.content).toContain('diagnosis.anchor')
     expect(registration?.content).toContain('aiops_incident_report')
     expect(registration?.content).toContain('CrashLoopBackOff')
-    expect(registration?.content).not.toContain('name: k8s-diag')
+    expect(registration?.content).toContain('Prometheus target down')
+    expect(registration?.content).toContain('Do not assume that the target is Kubernetes')
+    expect(registration?.content).not.toContain('name: aiops-diag')
   })
 
   it('keeps the runtime identity and description aligned with SKILL.md frontmatter', () => {
@@ -32,6 +34,6 @@ describe('packaged k8s-diag skill', () => {
     const document = readFileSync(path, 'utf8')
     expect(document).toContain(`name: ${SKILL_NAME}`)
     expect(document).toContain(`description: "${SKILL_DESCRIPTION}"`)
-    expect(document).toContain('version: "1.1.0"')
+    expect(document).toContain('version: "1.2.0"')
   })
 })

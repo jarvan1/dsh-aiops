@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a fingerprint router with durable queue/cooldown/resource budgets, the packaged `k8s-diag` skill, three observation Providers, seven observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; endpoints and the server-side kubeconfig path can be supplied through environment defaults or saved live in the Portal. Kubernetes reads need read-only cluster credentials but do not require kubectl.
+This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a general fingerprint router with durable queue/cooldown/resource budgets, the packaged `aiops-diag` skill, three observation Providers, seven observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; endpoints and the server-side kubeconfig path can be supplied through environment defaults or saved live in the Portal. Kubernetes reads need read-only cluster credentials but do not require kubectl.
 
 ## Table of Contents
 
@@ -52,9 +52,9 @@ The plugin command reconciles this package and its dependencies into the profile
 
 ### What you get
 
-The layer inserts a generic webhook runtime, deterministic incident router, globally registered `k8s-diag` instructions, an isolated Alertmanager listener, three observation Providers, observation/report/feedback/history tools, and a read-only `AIOps` Web tab. `AIOPS_WORKSPACE` selects both the diagnostic Workspace and the Portal's fixed server-side scope. The bundle keeps routing state, queue, and audit in `aiops-router.sqlite` and the disposable history index in `aiops-incidents.sqlite`. Default storm control uses a 60-second fingerprint cooldown, a 100-item/15-minute queue, three attempts, four globally active turns, and severity-specific concurrency/token reservations.
+The layer inserts a generic webhook runtime, deterministic incident router, globally registered `aiops-diag` instructions, an isolated Alertmanager listener, three observation Providers, observation/report/feedback/history tools, and a read-only `AIOps` Web tab. The router accepts all alert names except explicitly configured noise and assigns a default severity when the source value is missing or unknown. `AIOPS_WORKSPACE` selects both the diagnostic Workspace and the Portal's fixed server-side scope. The bundle keeps routing state, queue, and audit in `aiops-router.sqlite` and the disposable history index in `aiops-incidents.sqlite`. Default storm control uses a 60-second fingerprint cooldown, a 100-item/15-minute queue, three attempts, four globally active turns, and severity-specific concurrency/token reservations.
 
-Configure Alertmanager's webhook receiver to send JSON with `Authorization: Bearer <secret>`. An optional `X-DSH-Delivery-ID` enables sender-owned retry identity; otherwise the authenticated body digest is used. The shipped policy accepts the high-signal alertnames listed in [`cordis.patch.yml`](cordis.patch.yml), maps severity labels, and applies severity-specific model and storm-control budgets. A later profile patch can replace those policy values.
+Configure Alertmanager's webhook receiver to send JSON with `Authorization: Bearer <secret>`. An optional `X-DSH-Delivery-ID` enables sender-owned retry identity; otherwise the authenticated body digest is used. The shipped policy accepts arbitrary alert names except its explicit noise exclusions, normalizes known severity labels, falls back to a configured default severity, and applies severity-specific model and storm-control budgets. A later profile patch can replace those policy values.
 
 -----
 
@@ -95,7 +95,7 @@ None.
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through the packaged `k8s-diag` skill and the observation, incident, and incident-history packages inserted by this patch layer; those packages own instructions, tool schemas, and results.
+Indirectly, through the packaged `aiops-diag` skill and the observation, incident, and incident-history packages inserted by this patch layer; those packages own instructions, tool schemas, and results.
 
 #### KV Cache effect
 

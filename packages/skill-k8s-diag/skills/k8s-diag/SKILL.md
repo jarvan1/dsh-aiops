@@ -1,45 +1,57 @@
 ---
-name: k8s-diag
-description: "Diagnose routed Kubernetes and service alerts with the supplied alert-time window, read-only evidence tools, explicit hypothesis tests, and a durable structured incident report. Use for CrashLoopBackOff, NodeNotReady, Pending Pods, PVC, replica mismatch, error-rate, and latency alerts."
+name: aiops-diag
+description: "Diagnose general Alertmanager alerts with the supplied alert-time window, dynamically selected read-only evidence sources, explicit hypothesis tests, and a durable structured incident report. Use for Kubernetes, node, Prometheus target, service, error-rate, latency, storage, and sparsely labelled alerts."
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   owner: "dsh-aiops"
 ---
 
-# Kubernetes alert diagnosis
+# General AIOps alert diagnosis
 
-Follow this workflow for every routed alert.
+Follow this workflow for every routed Alertmanager alert. Do not assume that the target is Kubernetes.
 
 ## Guardrails
 
 - Use only the read-only AIOps tools. Never create, patch, delete, restart, scale, exec into, or otherwise mutate infrastructure.
 - Treat the route event's `diagnosis.anchor` as T0 and its `diagnosis.window` as authoritative. Do not substitute a relative window based on the current time.
-- Copy tool parameters from `diagnosis.prometheusQueryRange`, `diagnosis.kubernetesEvents`, and `diagnosis.kubernetesLogs`. Add only the query, namespace, Pod, container, or selector fields required by that tool.
+- Copy time parameters from `diagnosis.prometheusQueryRange`, `diagnosis.kubernetesEvents`, and `diagnosis.kubernetesLogs` when the corresponding tool is relevant. Add only supported target, query, namespace, Pod, container, or selector fields.
 - Separate observations from causal claims. A firing or resolved alert is evidence about an expression, not proof that an incident began, ended, or has a particular root cause.
-- Do not invent absent labels, workload ownership, deploy history, SLOs, or metric names. Record missing or inaccessible evidence as a limitation.
+- Do not invent absent labels, workload ownership, deploy history, SLOs, dependencies, or metric names. Record missing or inaccessible evidence as a limitation.
 - A routed turn may contain multiple deliveries for one fingerprint. Account for every route event, use the newest supplied diagnosis window for live queries, and write one coherent current report for the alert round.
 - Never call `aiops_incident_feedback` from alert lifecycle state, model confidence, or your own conclusion. It is only for a later, explicit operator confirmation, correction, or rejection.
 
+## Evidence-source selection
+
+Start from the alert payload and select only the relevant branches. More than one branch may apply.
+
+- Always inspect Alertmanager lifecycle and grouping context. Use `alertmanager_alerts` to confirm current state when useful.
+- Labels such as `namespace`, `pod`, `container`, `deployment`, `statefulset`, `daemonset`, `workload`, or `node` enable the Kubernetes branch.
+- Labels such as `job` or `instance`, or a Prometheus `generatorURL`, enable the Prometheus target branch.
+- Labels such as `service`, `app`, `route`, `endpoint`, `cluster`, or `environment` enable the service-metrics branch.
+- If labels are sparse, start with Alertmanager context and the alert annotations or `generatorURL`. Use Prometheus only when a concrete metric or expression can be recovered. State that target-specific evidence is unavailable rather than guessing a Kubernetes object or PromQL query.
+
 ## Investigation sequence
 
-1. Record the alert, fingerprint, round, lifecycle status, namespace/workload labels, T0, and observation window as initial facts.
-2. Identify the target from supplied labels. Read the named workload or node with `kubernetes_get`; use `kubernetes_list` with exact selectors to locate owned Pods and related objects. Avoid broad cluster-wide lists when a namespace or selector is available.
-3. Read `kubernetes_events` with the exact absolute `since_time` and `until_time` from the route. Prefer `involvedObject.name=<name>` and a namespace when known.
-4. For relevant Pods and containers, read bounded `kubernetes_logs` with the supplied absolute window, tail limit, and timestamps. For restarts, inspect both current and `previous: true` logs when a previous container exists.
-5. Use `prometheus_query_range` with the supplied `start`, `end`, and `step`. Choose PromQL from alert annotations or deployment conventions; use an instant query at T0 only when a range cannot answer the question.
+1. Record the alert name, fingerprint, round, lifecycle status, labels, annotations, T0, and observation window as initial facts.
+2. Confirm the current Alertmanager view when it can clarify firing/resolved state, grouping, receiver, or related alerts.
+3. Select evidence branches from the labels. State which branches were selected and why; skipped branches are not missing evidence when their identifying labels are absent.
+4. For the Prometheus target or service branch, use `prometheus_query_range` with the supplied `start`, `end`, and `step`. Recover PromQL from the alert expression, `generatorURL`, annotations, or known recording-rule conventions. Never manufacture a metric name. Use an instant query at T0 only when a range cannot answer the question.
+5. For the Kubernetes branch, read named objects with `kubernetes_get`, or use `kubernetes_list` with exact namespace and selectors to locate related objects. Then collect bounded Events and logs with the supplied absolute time window. Avoid broad cluster-wide discovery when a narrower target is available.
 6. Build a short timeline ordered around T0. Give every material fact a stable evidence ID. State at least one candidate hypothesis and the observation that would strengthen or weaken it.
 7. Persist the complete current state with `aiops_incident_report`, even when the conclusion is insufficient evidence. Keep `incidentId` stable for later updates. Every hypothesis must reference evidence IDs present in that same report. Recommendations are for human review only and must include risk.
 
 ## Scenario checks
 
-- **CrashLoopBackOff / container restarts:** inspect Pod container states, `lastState.terminated`, exit code/reason, restart count, probes, limits, current and previous logs, and Events. Correlate restart changes near T0; do not call an application log line the cause without matching lifecycle evidence.
-- **NodeNotReady:** inspect Node Ready condition transition time/reason/message, pressure conditions, taints, lease/heartbeat facts if visible, node Events, affected Pods, and node/workload metrics around T0. Distinguish control-plane observation loss from confirmed node failure.
-- **Pending Pod:** inspect Pod conditions, scheduling Events, requests, node selectors/affinity, taints/tolerations, quota, and referenced PVC state. Separate unschedulable, image-pull, and volume-attachment paths.
-- **PVC capacity or errors:** inspect PVC and PV phase, capacity, storage class, binding, conditions and Events. Correlate filesystem/volume metrics where available; avoid assuming filesystem exhaustion from PVC allocation alone.
-- **Replica mismatch:** compare desired, current, updated, available and unavailable replicas; inspect rollout conditions, ReplicaSets/Pods and Events. Test whether the mismatch is rollout progress, scheduling failure, readiness failure, or intentional scaling.
-- **High error rate:** reconstruct the alert PromQL when available, compare numerator and denominator over the exact range, segment by service/status/route only when labels support it, and correlate with workload state and logs. Small denominators and scrape gaps can mislead ratios.
-- **High latency:** inspect the exact histogram/summary or recording rule, quantile and traffic volume over the range, compare error/saturation signals, and correlate with workload state. A percentile spike does not by itself identify the slow dependency.
+- **Prometheus target down:** inspect `up`, scrape health or duration, label identity, and nearby alerts over the exact range. Distinguish scrape/network failure from confirmed service failure.
+- **Service error rate:** reconstruct the alert expression when available, compare numerator and denominator, and segment only by labels present in evidence. Check traffic volume and scrape gaps before interpreting ratios.
+- **Service latency:** inspect the exact histogram, summary, or recording rule, quantile and traffic volume over the range, then compare error and saturation signals. A percentile spike does not identify the slow dependency by itself.
+- **CrashLoopBackOff / container restarts:** inspect Pod container states, `lastState.terminated`, exit code/reason, restart count, probes, limits, current and previous logs, and Events. Correlate restart changes near T0.
+- **NodeNotReady:** inspect Ready and pressure conditions, transition reason/message, taints, lease or heartbeat facts when visible, node Events, affected workloads, and relevant metrics. Distinguish control-plane observation loss from confirmed node failure.
+- **Pending Pod:** inspect Pod conditions, scheduling Events, requests, selectors/affinity, taints/tolerations, quota, and referenced PVC state. Separate unschedulable, image-pull, and volume-attachment paths.
+- **Storage capacity or errors:** inspect the named storage target and its metrics. For Kubernetes PVC/PV labels, inspect phase, capacity, class, binding, conditions, and Events. Do not infer filesystem exhaustion from allocated capacity alone.
+- **Replica mismatch:** compare desired, current, updated, available, and unavailable replicas; inspect rollout conditions, child objects, Pods, and Events. Test rollout, scheduling, readiness, and intentional-scaling explanations.
+- **Sparse-label alert:** report the lifecycle and alert expression context that is actually available. Ask for the smallest missing identifier or datasource needed for a deeper pass; do not silently reinterpret it as a Kubernetes alert.
 
 ## Report quality gate
 
-Before finishing, ensure the report includes the T0/window fact, target identity, Kubernetes state, Events, logs and metrics that were available; every causal statement is a hypothesis with cited evidence; confidence is calibrated; gaps are explicit; and no recommended action is presented as already executed.
+Before finishing, ensure the report includes the T0/window fact, alert identity, selected evidence branches, all available relevant evidence, and explicit gaps. Every causal statement must be a hypothesis with cited evidence, confidence must be calibrated, and no recommended action may be presented as already executed. Kubernetes state, Events, and logs are required only when the alert identifies a Kubernetes target.
