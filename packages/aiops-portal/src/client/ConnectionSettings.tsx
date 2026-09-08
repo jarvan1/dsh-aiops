@@ -45,13 +45,12 @@ export function ConnectionSettings({ loadWebhookConfiguration, testConnection, p
   const [dirty, setDirty] = useState(false); const [initialized, setInitialized] = useState(false)
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [prometheusTest, setPrometheusTest] = useState<TestState>(IDLE_TEST); const [alertmanagerTest, setAlertmanagerTest] = useState<TestState>(IDLE_TEST); const [kubernetesTest, setKubernetesTest] = useState<TestState>(IDLE_TEST)
-  const [webhook, setWebhook] = useState<{ readonly url: string; readonly secretConfigured: boolean; readonly secret?: string }>()
-  const [secretVisible, setSecretVisible] = useState(false)
+  const [webhook, setWebhook] = useState<{ readonly url: string; readonly secretConfigured: boolean }>()
   const [webhookState, setWebhookState] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
     const controller = new AbortController()
-    void loadWebhookConfiguration(false, controller.signal).then(value => {
+    void loadWebhookConfiguration(controller.signal).then(value => {
       setWebhook(value); setWebhookState('ready')
     }).catch(error => {
       if (!(error instanceof DOMException && error.name === 'AbortError')) setWebhookState('error')
@@ -93,21 +92,6 @@ export function ConnectionSettings({ loadWebhookConfiguration, testConnection, p
     } catch { setSaveState('error') }
   }
   const edit = (reset: (state: TestState) => void) => { setDirty(true); setSaveState('idle'); reset(IDLE_TEST) }
-  const toggleSecret = async (): Promise<void> => {
-    if (secretVisible) {
-      setSecretVisible(false)
-      setWebhook(current => current === undefined ? current : { url: current.url, secretConfigured: current.secretConfigured })
-      return
-    }
-    setWebhookState('loading')
-    try {
-      const value = await loadWebhookConfiguration(true)
-      setWebhook(value); setSecretVisible(value.secret !== undefined); setWebhookState('ready')
-    } catch {
-      setWebhookState('error')
-    }
-  }
-
   return <section className={css.settingsPanel}>
     <div className={css.settingsIntro}><div><div className={css.eyebrow}>{t('settings')}</div><h2>{t('settingsTitle')}</h2><p>{t('settingsDescription')}</p></div><div className={css.liveBadge}><span/>LIVE</div></div>
     <div className={css.endpointGrid}>
@@ -132,10 +116,7 @@ export function ConnectionSettings({ loadWebhookConfiguration, testConnection, p
         <label className={css.endpointTitle} htmlFor="aiops-webhook-url"><span className={`${css.serviceDot} ${css.alertDot}`}/>{t('webhookUrl')}</label>
         <input id="aiops-webhook-url" type="url" readOnly value={webhook?.url ?? ''} placeholder={webhookState === 'loading' ? t('webhookLoading') : ''}/>
         <label className={css.endpointTitle} htmlFor="aiops-webhook-secret">{t('webhookSecret')}</label>
-        <div className={css.secretRow}>
-          <input id="aiops-webhook-secret" type={secretVisible ? 'text' : 'password'} readOnly autoComplete="off" value={secretVisible ? webhook?.secret ?? '' : ''} placeholder={webhook?.secretConfigured === true ? t('secretConfigured') : t('secretUnavailable')}/>
-          <button type="button" aria-pressed={secretVisible} disabled={webhookState === 'loading' || webhook?.secretConfigured !== true} onClick={() => { void toggleSecret() }}>{webhookState === 'loading' ? t('webhookLoading') : secretVisible ? t('hideSecret') : t('showSecret')}</button>
-        </div>
+        <input id="aiops-webhook-secret" type="text" readOnly autoComplete="off" value="" placeholder={webhook?.secretConfigured === true ? t('secretConfigured') : t('secretUnavailable')}/>
         <div className={webhookState === 'error' ? css.testFailed : css.webhookHint}>{webhookState === 'error' ? t('webhookLoadError') : t('webhookReadOnly')}</div>
       </div>
     </div>

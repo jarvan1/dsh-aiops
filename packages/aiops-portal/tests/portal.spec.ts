@@ -6,8 +6,22 @@ import { filterPortalIncidents } from '../src/client/model.ts'
 import { testEndpointConnection } from '../src/connectivity.ts'
 import { apply, testPortalConnection } from '../src/index.ts'
 import { readPortalSnapshot, summarizePortal } from '../src/snapshot.ts'
-import { PORTAL_API_PATH, PORTAL_CONNECTION_TEST_API_PATH, PORTAL_WEBHOOK_CONFIGURATION_API_PATH, type PortalIncident } from '../src/types.ts'
+import { PORTAL_API_PATH, PORTAL_CONNECTION_TEST_API_PATH, PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH, PORTAL_WEBHOOK_CONFIGURATION_API_PATH, type PortalIncident } from '../src/types.ts'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
+import type { RoutingSettings } from '@deepseek-ai/dsh-aiops-incident-router'
+
+const routingSettings: RoutingSettings = {
+  version: 1,
+  routingPolicy: { ignoredAlertnames: ['Watchdog'], defaultSeverity: 'warning' },
+  severityMap: { warning: 'warning', critical: 'critical' },
+  modelBudgets: { info: 1000, warning: 2000, critical: 3000 },
+  stormControl: {
+    cooldownSeconds: 60, maxQueueSize: 100, maxQueueAgeSeconds: 900, maxDispatchAttempts: 3,
+    retryBackoffSeconds: 10, globalConcurrency: 4,
+    severityConcurrency: { info: 1, warning: 2, critical: 4 }, globalReservedTokens: 10_000,
+    severityReservedTokens: { info: 1000, warning: 4000, critical: 10_000 },
+  },
+}
 
 function incident(overrides: Partial<PortalIncident> = {}): PortalIncident {
   return {
@@ -55,6 +69,7 @@ describe('AIOps Portal read model', () => {
     expect(route).toMatchObject({ kind: 'exact', path: PORTAL_API_PATH })
     expect(routes).toContainEqual(expect.objectContaining({ kind: 'exact', path: PORTAL_CONNECTION_TEST_API_PATH }))
     expect(routes).toContainEqual(expect.objectContaining({ kind: 'exact', path: PORTAL_WEBHOOK_CONFIGURATION_API_PATH }))
+    expect(routes).toContainEqual(expect.objectContaining({ kind: 'exact', path: PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH }))
     const req = Object.assign(new EventEmitter(), { method: 'POST' })
     const headers = new Map<string, unknown>()
     const res = {
@@ -69,7 +84,7 @@ describe('AIOps Portal read model', () => {
     expect(query).not.toHaveBeenCalled()
   })
 
-  it('reveals the webhook secret only when explicitly requested', async () => {
+  it('reports webhook credential status without ever disclosing the secret', async () => {
     const routes: WebRoute[] = []
     const resolve = vi.fn(async () => ({ value: 'portal-test-secret' }))
     const ctx: Record<string, unknown> = {
@@ -87,11 +102,8 @@ describe('AIOps Portal read model', () => {
       webhookSecretRef: 'AIOPS_ALERTMANAGER_WEBHOOK_SECRET',
     })
     const route = routes.find(value => value.path === PORTAL_WEBHOOK_CONFIGURATION_API_PATH)
-    const request = async (revealSecret: boolean) => {
-      const req = Object.assign(Readable.from([JSON.stringify({ revealSecret })]), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-      })
+    const request = async () => {
+      const req = Object.assign(new EventEmitter(), { method: 'GET', headers: {} })
       let body = ''
       const res = {
         statusCode: 0,
@@ -101,18 +113,43 @@ describe('AIOps Portal read model', () => {
       await route?.handler(req as never, res as never)
       return JSON.parse(body) as Record<string, unknown>
     }
-    await expect(request(false)).resolves.toEqual({
-      version: 1,
+    await expect(request()).resolves.toEqual({
+      version: 2,
       url: 'https://dsh.example.test:3081/alertmanager',
       secretConfigured: true,
     })
-    await expect(request(true)).resolves.toEqual({
-      version: 1,
-      url: 'https://dsh.example.test:3081/alertmanager',
-      secretConfigured: true,
-      secret: 'portal-test-secret',
-    })
+    expect(JSON.stringify(await request())).not.toContain('portal-test-secret')
     expect(resolve).toHaveBeenCalledTimes(2)
+  })
+
+  it('validates and evaluates a routing-policy dry-run without mutation', async () => {
+    const routes: WebRoute[] = []
+    const dryRun = vi.fn(() => ({ version: 1, accepted: true, alertname: 'TargetDown', severity: 'warning', reason: 'accepted' }))
+    const ctx: Record<string, unknown> = {
+      effect: (setup: () => () => void) => { setup() },
+      webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
+      sessionQuery: {}, kubernetes: {}, credentials: { resolve: vi.fn(async () => undefined) },
+      aiopsIncidentRouter: { dryRun }, logger: { warn: vi.fn() },
+    }
+    ctx.inject = (_services: string[], mount: (value: unknown) => void) => mount(ctx)
+    apply(ctx as never, {})
+    const route = routes.find(value => value.path === PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH)
+    const req = Object.assign(Readable.from([JSON.stringify({ labels: { alertname: 'TargetDown' }, settings: routingSettings })]), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+    })
+    let body = ''
+    const res = { statusCode: 0, setHeader: vi.fn(), end: (value?: string) => { body = value ?? '' } }
+    await route?.handler(req as never, res as never)
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(body)).toMatchObject({ accepted: true, severity: 'warning' })
+    expect(dryRun).toHaveBeenCalledWith({ alertname: 'TargetDown' }, routingSettings)
+    const crossSite = Object.assign(Readable.from([JSON.stringify({ labels: {}, settings: routingSettings })]), {
+      method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site', origin: 'https://evil.example', host: 'dsh.example' },
+    })
+    const rejected = { statusCode: 0, setHeader: vi.fn(), end: vi.fn() }
+    await route?.handler(crossSite as never, rejected as never)
+    expect(rejected.statusCode).toBe(403)
+    expect(dryRun).toHaveBeenCalledOnce()
   })
 
   it('tests the real Prometheus and Alertmanager API shapes without saving settings', async () => {
@@ -193,6 +230,8 @@ describe('AIOps Portal read model', () => {
       aiopsIncidentRouter: {
         workspacePath: '/srv/prod',
         listControlAudit: () => [{ id: 8, source: 'am', deliveryId: 'd', fingerprint: 'fp', alertname: 'HighLatency', severity: 'critical', outcome: 'completed', reason: 'diagnosed', sessionId: 'aiops-session-1', round: 1, queueDepth: 0, reservedTokens: 0, recordedAt: 1_010, attempt: 1 }],
+        routingSettings: () => routingSettings,
+        listPolicyAudit: () => [],
       },
       sessionQuery: {
         filterSessions: vi.fn(async () => [{ header: { id: 'aiops-session-1' } }]),
@@ -202,7 +241,7 @@ describe('AIOps Portal read model', () => {
     }
     const snapshot = await readPortalSnapshot(ctx as never, { maxIncidents: 10, maxAuditRecords: 10, maxScanSessions: 10 })
     expect(ctx.sessionQuery.filterSessions).toHaveBeenCalledWith([{ kind: 'cwd', values: ['/srv/prod'] }], undefined)
-    expect(snapshot).toMatchObject({ version: 1, workspace: '/srv/prod', generatedAt: 9_999 })
+    expect(snapshot).toMatchObject({ version: 2, workspace: '/srv/prod', generatedAt: 9_999, routingSettings, routingPolicyAudit: [] })
     expect(snapshot.incidents).toHaveLength(1)
     expect(snapshot.incidents[0]).toMatchObject({ reportSeq: 3, incident: { title: 'Latest diagnosis' }, lastRoute: { outcome: 'completed' } })
   })

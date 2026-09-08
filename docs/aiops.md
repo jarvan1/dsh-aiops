@@ -35,9 +35,9 @@ kubernetes_*        -> ctx.kubernetes   -> native kubeconfig client -> Kubernete
                     |
  incident history / feedback history / routing audit
                     |
-       same-origin read-only Portal snapshot
+       same-origin Portal snapshot + revision-fenced settings
                     |
-       overview / filters / detail / route audit
+ overview / detail / route audit / routing-policy dry-run
 ```
 
 Observation tools return bounded canonical JSON or exact bounded log text and never accept mutation verbs, URLs, shell strings, unrestricted kubectl arguments, or streaming modes. The agent converts relevant observations into evidence records, references those IDs from hypotheses, assigns explicit confidence, and stores proposed actions only as human-reviewable recommendations.
@@ -48,6 +48,8 @@ The Alertmanager adapter accepts only authenticated, bounded v4 JSON. It validat
 
 SQLite maps `(source, fingerprint)` to the current alert round and deterministic Session ID. Policy-eligible alerts enter a durable queue before Agent creation. Ready items with the same fingerprint/status are grouped and constrained by fingerprint cooldown, queue age/capacity, global/per-severity concurrency, and in-flight token reservations. Critical work has priority, equal severity remains FIFO, and restart recovers processing work. Every filtered, deferred, grouped, dropped, started, completed, and failed transition is audited.
 
+The versioned `aiops-routing` settings surface can change exclusions, severity normalization/defaults, cooldown, queue/retry, concurrency, and token budgets without restart. Portal requires a successful side-effect-free labels dry-run before one revision-fenced atomic save; the router validates cross-field limits, applies the commit live, and stores before/after hashes plus changed fields in durable policy audit.
+
 The first firing creates round 1; repeated firing and resolved notifications append to the same Session; firing after resolution opens a new round. `resolved` means only that the alert expression recovered. Every accepted decision and normalized alert is appended as `aiops/alert-routed` v2 before the model-visible follow-up. The event canonicalizes `startsAt` as T0 and contains one replay-stable window plus exact Prometheus range, Kubernetes Event, and Pod-log parameters.
 
 ## Capability roles
@@ -56,10 +58,11 @@ The first firing creates round 1; repeated firing and resolved notifications app
 |---|---|---|
 | Alert delivery | [`dsh-webhook-alertmanager`](../packages/webhook-alertmanager/README.md), isolated HTTP listener, `ctx.webhookRuntime` | [`dsh-aiops-incident-router`](../packages/incident-router/README.md), `ctx.aiopsIncidentRouter` |
 | Alertmanager alerts | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.md), `ctx.alertmanager`, HTTP API v2 | `alertmanager_alerts` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
-| Prometheus query | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.md), `ctx.prometheus`, HTTP query API | `prometheus_query`, `prometheus_query_range` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
+| Prometheus observation | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.md), `ctx.prometheus`, bounded HTTP query/discovery APIs | `prometheus_query`, `prometheus_query_range`, `prometheus_rules`, `prometheus_targets`, `prometheus_discovery` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Kubernetes read | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.md), `ctx.kubernetes`, official native API client (optional kubectl compatibility subpath) | `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, `kubernetes_logs` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Diagnostic workflow | Packaged [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.md), registered globally | `aiops-diag` dynamically selects Alertmanager, Prometheus, service, and Kubernetes evidence branches |
-| Operations Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.md), fixed same-origin `/api/aiops/portal` | Persistent DSH Web sidebar action, Session view, and live data-source settings |
+| Operations Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.md), fixed same-origin `/api/aiops/portal` | Persistent DSH Web sidebar action, Session view, live data-source/routing settings, and dry-run |
+| Product observability | [`dsh-aiops-observability`](../packages/aiops-observability/README.md), `ctx.aiopsTelemetry` | `/api/aiops/healthz`, `/api/aiops/readyz`, and low-cardinality `/api/aiops/metrics` |
 
 Each capability combines its Service Definition and current Provider in one package because they currently evolve as one concern. A second transport or remote execution provider is the trigger to split Provider packages; the Consumer already depends only on the abstract Service.
 
@@ -71,21 +74,21 @@ The `aiopsIncident` projection is last-valid-write-wins and validates both resto
 
 ## Persistence, database, and RAG
 
-The subsystem reuses DSH Session persistence for diagnostic truth. JSONL stores routed alerts, model-visible messages, tool observations, incident state, and operator feedback; `ctx.sessionProjections` supplies current state. `aiops-router.sqlite` owns delivery replay, queue and storm-control audit, and fingerprint-to-round coordination. The bundle enables `dsh-session-query-sqlite` at `aiops-incidents.sqlite`; `dsh-tool-aiops-history` scopes tool reads to the caller workspace. The Portal adds no database: its endpoint is fixed to the router-configured diagnosis workspace and bounds all session, incident, and audit scans.
+The subsystem reuses DSH Session persistence for diagnostic truth. JSONL stores routed alerts, model-visible messages, tool observations, incident state, and operator feedback; `ctx.sessionProjections` supplies current state. `aiops-router.sqlite` owns delivery replay, queue, storm-control and routing-policy audit, and fingerprint-to-round coordination. The bundle enables `dsh-session-query-sqlite` at `aiops-incidents.sqlite`; `dsh-tool-aiops-history` scopes tool reads to the caller workspace. The Portal adds no database: its endpoint is fixed to the router-configured diagnosis workspace and bounds all session, incident, and audit scans.
 
 RAG is deferred because the loop diagnoses from live operational state and there is no validated runbook corpus yet. Add retrieval only when a maintained corpus, access policy, citations, freshness rules, and evaluation set exist; retrieval should contribute evidence or operator guidance, never bypass read-only tool and approval policy.
 
 ## Safety boundary
 
-The package set contains no Alertmanager write, Kubernetes mutation, exec, arbitrary command, streaming log follow, remediation, or approval-bypass path. Deployment still owns network ACLs, Alertmanager and Prometheus access, kubeconfig selection, and read-only Kubernetes RBAC. Provider configuration is trusted application composition, while model inputs are constrained and validated before I/O.
+The package set contains no Alertmanager write, Kubernetes mutation, exec, arbitrary command, streaming log follow, remediation, or approval-bypass path. The Portal never returns the webhook bearer value; it exposes only URL and configured status, and its connection-test/dry-run POSTs reject cross-site browser requests. Deployment still owns the authenticated DSH Host boundary, TLS and reverse-proxy headers, network ACLs, Alertmanager/Prometheus access, kubeconfig selection, credential rotation, and read-only Kubernetes RBAC. See [production deployment and upgrade](deployment.md).
 
 ## Current limits
 
 - Alerts: authenticated Alertmanager v4 ingress and current-alert reads; no silences or mutation APIs.
-- Metrics: PromQL instant and range query only; no rule or metadata APIs.
+- Metrics: bounded PromQL instant/range queries plus rule, target, label, and series discovery; no Prometheus writes or unrestricted metadata scans.
 - Cluster: object get/list, absolute-window Events, and bounded absolute-window non-streaming Pod logs only; no watch, discovery, exec, or topology graph.
 - State: one incident per alert round; firing after expression recovery opens a new Session round. Feedback is explicitly appended and does not train the model online. Cross-Session history is read-only and workspace-scoped, with no merge, aggregate analytics, or ticket-system synchronization.
-- Experience: the Web profile includes an always-available read-only AIOps Portal and live persistent Prometheus/Alertmanager settings; Electron and in-Portal feedback/remediation are not supported yet.
+- Experience: the Web profile includes an always-available AIOps Portal, live persistent data-source settings, and revision-fenced routing-policy management; incidents remain read-only, and Electron plus in-Portal feedback/remediation are not supported yet.
 - Action: recommendations are text for human review; no automated remediation.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
@@ -210,3 +213,5 @@ Source: [`packages/aiops-prometheus/src/index.ts`](../packages/aiops-prometheus/
 - [Time-anchored diagnosis decision](decisions/2026-09-06-time-anchored-diagnosis.md) — T0/window derivation, bounded Kubernetes reads, and packaged skill availability.
 - [Feedback and alert-storm decision](decisions/2026-09-06-operator-feedback-storm-control.md) — append-only review, queue, resource budgets, and audit semantics.
 - [AIOps Portal decision](decisions/2026-09-06-aiops-portal.md) — same-origin endpoint, workspace scope, and read-only UI boundary.
+- [Production deployment and upgrade](deployment.md) — Host/TLS boundary, credential rotation, migration, and release procedure.
+- [Repeatable Alertmanager/k3s matrix](../deploy/alertmanager/README.md) — guarded real receiver and restart workflow.

@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包向模型提供七个只读观测工具：Alertmanager 当前告警、Prometheus 即时/范围查询，以及 Kubernetes 对象/列表/Event/Pod 日志读取。将其与各 Service 的一个 Provider 配合使用，可收集事实性的事件证据。这些工具不暴露原始 HTTP URL、shell 命令、任意 kubectl 参数、日志跟随或变更操作。Provider 限制约束返回给模型的每个完整结果。
+本包向模型提供十个只读观测工具：Alertmanager 当前告警；Prometheus 即时/范围查询、规则查询、Target 健康和有界元数据发现；以及 Kubernetes 对象/列表/Event/Pod 日志读取。将其与各 Service 的一个 Provider 配合使用，可收集事实性的事件证据。这些工具不暴露任意 HTTP 抓取、shell 命令、任意 kubectl 参数、日志跟随或变更操作。Provider 限制约束返回给模型的每个完整结果。
 
 ## 目录
 
@@ -54,7 +54,7 @@ kind: "package-reference"
 
 | 文件 | 作用 |
 |---|---|
-| [`src/index.ts`](src/index.ts) | 七个 schema、Service 调用、渲染与纯调用展示 |
+| [`src/index.ts`](src/index.ts) | 十个 schema、Service 调用、渲染与纯调用展示 |
 | — | 不发布 invariant companion，因为该适配器不拥有独立状态或生命周期流 |
 
 </details>
@@ -86,11 +86,11 @@ kind: "package-reference"
 
 #### 模型看到的内容
 
-模型会看到注册的 `alertmanager_alerts`、`prometheus_query`、`prometheus_query_range`、`kubernetes_get`、`kubernetes_list`、`kubernetes_events` 与 `kubernetes_logs` schema。其描述把每项操作标识为只读，并要求模型把观测用作证据，而不是立即视为因果证明。
+模型会看到注册的 `alertmanager_alerts`、`prometheus_query`、`prometheus_query_range`、`prometheus_rules`、`prometheus_targets`、`prometheus_discovery`、`kubernetes_get`、`kubernetes_list`、`kubernetes_events` 与 `kubernetes_logs` schema。其描述把每项操作标识为只读，并要求模型把观测用作证据，而不是立即视为因果证明。
 
 #### Token 影响
 
-本插件可见时，七个 schema 会添加固定的请求前缀。每次成功调用都会追加 Provider 约束大小的 JSON 或精确的有界日志文本；失败时则追加受控的工具错误。
+本插件可见时，十个 schema 会添加固定的请求前缀。每次成功调用都会追加 Provider 约束大小的 JSON 或精确的有界日志文本；失败时则追加受控的工具错误。
 
 #### KV 缓存影响
 

@@ -1,0 +1,6 @@
+{
+  "alertname": "TargetDown",
+  "severity": "warning",
+  "job": "api-server",
+  "namespace": "production"
+}

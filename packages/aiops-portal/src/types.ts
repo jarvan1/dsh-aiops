@@ -1,16 +1,29 @@
 import type { AiopsIncidentState, AiopsOperatorFeedback } from '@deepseek-ai/dsh-aiops-incident'
-import type { RouteAuditOutcome, RouteAuditRecord } from '@deepseek-ai/dsh-aiops-incident-router'
+import type {
+  RouteAuditOutcome,
+  RouteAuditRecord,
+  RoutingPolicyAuditRecord,
+  RoutingPolicyEvaluation,
+  RoutingSettings,
+} from '@deepseek-ai/dsh-aiops-incident-router'
 
 export const PORTAL_API_PATH = '/api/aiops/portal'
 export const PORTAL_CONNECTION_TEST_API_PATH = '/api/aiops/portal/connections/test'
 export const PORTAL_WEBHOOK_CONFIGURATION_API_PATH = '/api/aiops/portal/webhook-configuration'
+export const PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH = '/api/aiops/portal/routing-policy/dry-run'
 
 export interface WebhookConfiguration {
-  readonly version: 1
+  readonly version: 2
   readonly url: string
   readonly secretConfigured: boolean
-  readonly secret?: string
 }
+
+export interface RoutingPolicyDryRunRequest {
+  readonly labels: Readonly<Record<string, string>>
+  readonly settings: RoutingSettings
+}
+
+export type RoutingPolicyDryRunResult = RoutingPolicyEvaluation
 
 export type ConnectionTarget = 'prometheus' | 'alertmanager' | 'kubernetes'
 
@@ -75,10 +88,12 @@ export interface PortalSummary {
 }
 
 export interface PortalSnapshot {
-  readonly version: 1
+  readonly version: 2
   readonly workspace: string
   readonly generatedAt: number
   readonly summary: PortalSummary
   readonly incidents: PortalIncident[]
   readonly audit: RouteAuditRecord[]
+  readonly routingSettings: RoutingSettings
+  readonly routingPolicyAudit: RoutingPolicyAuditRecord[]
 }

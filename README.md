@@ -12,7 +12,7 @@ The current source bundle is built and tested against:
 | --- | --- |
 | DSH | `@deepseek-ai/dsh@0.1.2-rc.1` |
 | Node.js | `^22.19.0` or `>=24.0.0` |
-| pnpm | `>=10` (Git prepare-script approval may be required) |
+| pnpm | `11.7.0` (`>=10` Git prepare-script approval semantics are required) |
 
 Install the repository directly into the DSH Web profile:
 
@@ -56,6 +56,8 @@ The GitHub installation uses the repository root bundle and relative built plugi
 
 In a Web profile, use the persistent `AIOps` action in the sidebar footer to open the global Portal from any screen. A non-blank Session also exposes the existing `AIOps` conversation view. The Portal always reads `AIOPS_WORKSPACE`; it does not widen scope based on the currently selected chat Session. Prometheus/Alertmanager URLs and the server-side kubeconfig path/context are persisted in DSH user settings and apply live. All three sources must pass connectivity tests; Kubernetes also verifies the minimum read-only RBAC capabilities.
 
-See [the AIOps subsystem guide](docs/aiops.md) for the delivery lifecycle, [the roadmap](docs/roadmap.md) for completed and upcoming stages, [the changelog](CHANGELOG.md) for notable changes, and [the Codex handoff](CODEX_HANDOFF.md) for the exact working-tree state and continuation checklist.
+The same workspace manages versioned routing policy. A pasted normalized-label dry-run must succeed before the complete policy is saved atomically with a settings revision fence; changes apply live and are durably audited. The webhook credential remains server-side and the Portal returns only its configured status.
+
+See [the AIOps subsystem guide](docs/aiops.md) for the delivery lifecycle, [production deployment and upgrade](docs/deployment.md) for the Host/TLS/rotation boundary, [the repeatable Alertmanager/k3s matrix](deploy/alertmanager/README.md) for real-cluster validation, [the roadmap](docs/roadmap.md) for completed and upcoming stages, and [the changelog](CHANGELOG.md) for notable changes.
 
 The main DSH repository remains the source of generic Session, query, workflow, permission, and runtime capabilities. This repository owns only the AIOps domain packages and bundle.

@@ -4,6 +4,7 @@ import { act } from 'react-dom/test-utils'
 import { createRoot } from 'react-dom/client'
 import { describe, expect, it, vi } from 'vitest'
 import { ConnectionSettings } from '../src/client/ConnectionSettings.tsx'
+import { RoutingPolicySettings } from '../src/client/RoutingPolicySettings.tsx'
 import { apply, inject } from '../src/client/index.ts'
 
 describe('AIOps Portal client registration', () => {
@@ -40,7 +41,7 @@ describe('AIOps Portal client registration', () => {
     apply(ctx as never)
 
     expect(inject).toEqual(['slots', 'locale', 'settingsScope'])
-    expect(ctx.settingsScope.bind).toHaveBeenCalledTimes(3)
+    expect(ctx.settingsScope.bind).toHaveBeenCalledTimes(4)
     expect(registrations[0]?.options).toMatchObject({
       name: 'conversation.view',
       id: 'aiops',
@@ -83,11 +84,10 @@ describe('AIOps Portal client registration', () => {
     const testConnection = vi.fn(async (request: { target: string }) => request.target === 'kubernetes'
       ? { ok: true, latencyMs: 3, kubernetes: { context: 'prod', cluster: 'prod', namespace: 'default', server: 'https://cluster' } } as const
       : { ok: true, latencyMs: 3 } as const)
-    const loadWebhookConfiguration = vi.fn(async (revealSecret: boolean) => ({
-      version: 1 as const,
+    const loadWebhookConfiguration = vi.fn(async () => ({
+      version: 2 as const,
       url: 'http://dsh-host:3081/alertmanager',
       secretConfigured: true,
-      ...(revealSecret ? { secret: 'test-secret' } : {}),
     }))
     const t = (key: string, params?: Record<string, unknown>) => params === undefined
       ? key : `${key}:${Object.values(params).join(',')}`
@@ -116,14 +116,10 @@ describe('AIOps Portal client registration', () => {
     const button = (label: string) => [...container.querySelectorAll('button')]
       .find(value => value.textContent === label) as HTMLButtonElement
     expect(button('save').disabled).toBe(true)
-    expect(loadWebhookConfiguration).toHaveBeenCalledWith(false, expect.any(AbortSignal))
+    expect(loadWebhookConfiguration).toHaveBeenCalledWith(expect.any(AbortSignal))
     expect((container.querySelector('#aiops-webhook-url') as HTMLInputElement).value).toBe('http://dsh-host:3081/alertmanager')
-
-    await act(async () => { button('showSecret').click() })
-    expect(loadWebhookConfiguration).toHaveBeenCalledWith(true)
-    expect((container.querySelector('#aiops-webhook-secret') as HTMLInputElement).value).toBe('test-secret')
-    await act(async () => { button('hideSecret').click() })
     expect((container.querySelector('#aiops-webhook-secret') as HTMLInputElement).value).toBe('')
+    expect((container.querySelector('#aiops-webhook-secret') as HTMLInputElement).placeholder).toBe('secretConfigured')
 
     await act(async () => {
       const tests = [...container.querySelectorAll('button')].filter(value => value.textContent === 'testConnection')
@@ -134,6 +130,53 @@ describe('AIOps Portal client registration', () => {
     expect(testConnection).toHaveBeenCalledTimes(3)
     expect(button('save').disabled).toBe(false)
 
+    await act(async () => { root.unmount() })
+  })
+
+  it('requires a successful candidate dry-run before atomically saving routing settings', async () => {
+    Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true)
+    const value = {
+      version: 1 as const,
+      routingPolicy: { ignoredAlertnames: ['Watchdog'], defaultSeverity: 'warning' as const },
+      severityMap: { warning: 'warning' as const, page: 'critical' as const },
+      modelBudgets: { info: 1000, warning: 2000, critical: 3000 },
+      stormControl: {
+        cooldownSeconds: 60, maxQueueSize: 100, maxQueueAgeSeconds: 900, maxDispatchAttempts: 3,
+        retryBackoffSeconds: 10, globalConcurrency: 4, severityConcurrency: { info: 1, warning: 2, critical: 4 },
+        globalReservedTokens: 10_000, severityReservedTokens: { info: 1000, warning: 4000, critical: 10_000 },
+      },
+    }
+    const mutate = vi.fn(async () => {})
+    const routingSnapshot = { status: 'ready', value, base: value, user: undefined, revision: 7, writable: true, mode: 'host' } as const
+    const routingSettings = {
+      getSnapshot: () => routingSnapshot,
+      subscribe: () => vi.fn(), mutate, set: vi.fn(), unset: vi.fn(),
+    }
+    const dryRunRoutingPolicy = vi.fn(async () => ({ version: 1 as const, accepted: true, alertname: 'TargetDown', severity: 'warning' as const, reason: 'accepted' as const }))
+    const container = document.createElement('div'); const root = createRoot(container)
+    const t = (key: string, params?: Record<string, unknown>) => params === undefined ? key : `${key}:${Object.values(params).join(',')}`
+    await act(async () => { root.render(createElement(RoutingPolicySettings, { routingSettings: routingSettings as never, dryRunRoutingPolicy, audit: [], t: t as never })) })
+    const jsonEditors = [...container.querySelectorAll<HTMLTextAreaElement>('textarea[data-json-editor]')]
+    expect(jsonEditors).toHaveLength(4)
+    expect(jsonEditors.every(editor => editor.placeholder.startsWith('{\n'))).toBe(true)
+    expect(container.querySelector('select')?.className).toContain('policySelect')
+    const ignored = container.querySelector('textarea') as HTMLTextAreaElement
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(ignored, 'Watchdog\nInfoInhibitor')
+      ignored.dispatchEvent(new Event('input', { bubbles: true }))
+      const dryRunLabels = jsonEditors.at(-1)!
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(dryRunLabels, '{"alertname":"TargetDown","severity":"warning"}')
+      dryRunLabels.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const button = (label: string) => [...container.querySelectorAll('button')].find(item => item.textContent === label) as HTMLButtonElement
+    expect(button('save').disabled).toBe(true)
+    await act(async () => { button('policyDryRun').click() })
+    expect(dryRunRoutingPolicy).toHaveBeenCalledOnce()
+    expect(button('save').disabled).toBe(false)
+    await act(async () => { button('save').click() })
+    expect(mutate).toHaveBeenCalledWith(expect.arrayContaining([
+      { op: 'set', path: ['routingPolicy'], value: { ignoredAlertnames: ['Watchdog', 'InfoInhibitor'], defaultSeverity: 'warning' } },
+    ]), 7)
     await act(async () => { root.unmount() })
   })
 })

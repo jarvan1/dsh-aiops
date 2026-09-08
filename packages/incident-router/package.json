@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-aiops-incident-router",
-  "description": "Durable Alertmanager routing, storm control, and Session lifecycle for DSH AIOps",
+  "description": "Durable Alertmanager routing, live policy audit, storm control, and Session lifecycle for DSH AIOps",
   "version": "0.1.2-rc.1",
   "publishConfig": {
     "access": "public"
@@ -37,6 +37,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-aiops-observability": "workspace:^",
     "@deepseek-ai/dsh-agent": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-agent-default-model": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-agent-presets": "^0.1.2-rc.1",
@@ -51,6 +52,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-aiops-observability": "workspace:^",
     "@deepseek-ai/dsh-agent": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-agent-default-model": "^0.1.2-rc.1",
     "@deepseek-ai/dsh-agent-presets": "^0.1.2-rc.1",

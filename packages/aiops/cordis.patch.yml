@@ -9,6 +9,9 @@
     openAt: startup
 
 - insert:
+    - id: aiops-observability
+      name: '@deepseek-ai/dsh-aiops-observability'
+
     - id: webhook-runtime
       name: '@deepseek-ai/dsh-webhook'
 
@@ -107,6 +110,11 @@
         baseUrl: !!js process.env.PROMETHEUS_URL
         timeoutMs: 30000
         maxResponseBytes: 2000000
+        defaultDiscoveryLimit: 20
+        maxDiscoveryLimit: 100
+        maxMatcherCount: 20
+        maxInputChars: 2000
+        maxDiscoveryWindowSeconds: 86400
 
     - id: aiops-kubernetes
       name: '@deepseek-ai/dsh-aiops-kubernetes'

@@ -21,7 +21,16 @@ import type {
   KubernetesLogsSpec,
 } from '@deepseek-ai/dsh-aiops-kubernetes'
 import { PrometheusRuntime } from '@deepseek-ai/dsh-aiops-prometheus'
-import type { PrometheusInstantQuery, PrometheusRangeQuery } from '@deepseek-ai/dsh-aiops-prometheus'
+import type {
+  PrometheusDiscoveryRequest,
+  PrometheusDiscoveryResult,
+  PrometheusInstantQuery,
+  PrometheusRangeQuery,
+  PrometheusRulesRequest,
+  PrometheusRulesResult,
+  PrometheusTargetsRequest,
+  PrometheusTargetsResult,
+} from '@deepseek-ai/dsh-aiops-prometheus'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
@@ -51,12 +60,44 @@ class FakeAlertmanager extends AlertmanagerRuntime {
 }
 
 class FakePrometheus extends PrometheusRuntime {
+  readonly ruleRequests: PrometheusRulesRequest[] = []
+  readonly targetRequests: PrometheusTargetsRequest[] = []
+  readonly discoveryRequests: PrometheusDiscoveryRequest[] = []
+
   override query(request: PrometheusInstantQuery): Promise<{ resultType: 'vector'; result: JsonValue }> {
     return Promise.resolve({ resultType: 'vector', result: [{ metric: {}, value: [1, request.query] }] })
   }
 
   override queryRange(_request: PrometheusRangeQuery): Promise<{ resultType: 'matrix'; result: JsonValue }> {
     return Promise.resolve({ resultType: 'matrix', result: [] })
+  }
+
+  override rules(request: PrometheusRulesRequest): Promise<PrometheusRulesResult> {
+    this.ruleRequests.push(request)
+    return Promise.resolve({
+      alertName: request.alertName,
+      rules: [],
+      truncated: false,
+    })
+  }
+
+  override targets(request: PrometheusTargetsRequest): Promise<PrometheusTargetsResult> {
+    this.targetRequests.push(request)
+    return Promise.resolve({
+      targets: [{
+        state: 'active',
+        labels: { job: 'api' },
+        discoveredLabels: {},
+        health: 'down',
+        lastError: 'connection refused',
+      }],
+      truncated: false,
+    })
+  }
+
+  override discover(request: PrometheusDiscoveryRequest): Promise<PrometheusDiscoveryResult> {
+    this.discoveryRequests.push(request)
+    return Promise.resolve({ kind: request.kind, items: ['instance'], truncated: false })
   }
 }
 
@@ -111,7 +152,7 @@ afterEach(async () => {
 })
 
 describe('AIOps observation tools through a real Loader composition', () => {
-  it('publishes and executes the seven provider-neutral read tools, then unregisters them', async () => {
+  it('publishes and executes the ten provider-neutral read tools, then unregisters them', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-aiops-observe-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
@@ -150,7 +191,8 @@ describe('AIOps observation tools through a real Loader composition', () => {
     await ctx.loader.await()
 
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
-      'alertmanager_alerts', 'prometheus_query', 'prometheus_query_range', 'kubernetes_get',
+      'alertmanager_alerts', 'prometheus_query', 'prometheus_query_range', 'prometheus_rules',
+      'prometheus_targets', 'prometheus_discovery', 'kubernetes_get',
       'kubernetes_list', 'kubernetes_events', 'kubernetes_logs',
     ])
     const alertResult = await ctx.tools.execute({
@@ -204,6 +246,68 @@ describe('AIOps observation tools through a real Loader composition', () => {
     expect(range.isError).toBe(false)
     if (range.isError) throw new Error('expected metrics range success')
     expect(range.value).toEqual({ resultType: 'matrix', result: [] })
+
+    const prometheusRuntime = ctx.prometheus as FakePrometheus
+    const rules = await ctx.tools.execute({
+      callId: ToolCallId('prometheus-rules'),
+      name: 'prometheus_rules',
+      arguments: {
+        alert_name: 'TargetDown',
+        label_matchers: [{ name: 'job', value: 'api' }],
+        generator_url: 'https://metrics.test/graph?g0.expr=up',
+        limit: 5,
+      },
+      signal: new AbortController().signal,
+    })
+    expect(rules.isError).toBe(false)
+    expect(prometheusRuntime.ruleRequests).toEqual([{
+      alertName: 'TargetDown',
+      labelMatchers: [{ name: 'job', value: 'api' }],
+      generatorUrl: 'https://metrics.test/graph?g0.expr=up',
+      limit: 5,
+    }])
+
+    const targets = await ctx.tools.execute({
+      callId: ToolCallId('prometheus-targets'),
+      name: 'prometheus_targets',
+      arguments: {
+        label_matchers: [{ name: 'job', value: 'api' }],
+        scrape_pool: 'api',
+        state: 'active',
+        limit: 3,
+      },
+      signal: new AbortController().signal,
+    })
+    expect(targets.isError).toBe(false)
+    expect(prometheusRuntime.targetRequests).toEqual([{
+      labelMatchers: [{ name: 'job', value: 'api' }],
+      scrapePool: 'api',
+      state: 'active',
+      limit: 3,
+    }])
+
+    const discovery = await ctx.tools.execute({
+      callId: ToolCallId('prometheus-discovery'),
+      name: 'prometheus_discovery',
+      arguments: {
+        kind: 'label_values',
+        matchers: ['up{job="api"}'],
+        label_name: 'instance',
+        start: '2026-09-08T00:00:00Z',
+        end: '2026-09-08T00:30:00Z',
+        limit: 10,
+      },
+      signal: new AbortController().signal,
+    })
+    expect(discovery.isError).toBe(false)
+    expect(prometheusRuntime.discoveryRequests).toEqual([{
+      kind: 'label_values',
+      matchers: ['up{job="api"}'],
+      labelName: 'instance',
+      start: '2026-09-08T00:00:00Z',
+      end: '2026-09-08T00:30:00Z',
+      limit: 10,
+    }])
 
     const session = ctx.sessions.create(SessionId('aiops-loader'), { meta: { cwd: '/workspace' } })
     const kubernetes = await ctx.tools.execute({

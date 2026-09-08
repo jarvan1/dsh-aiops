@@ -1,6 +1,6 @@
 {
   "name": "@deepseek-ai/dsh-aiops-portal",
-  "description": "Read-only workspace incident portal for DSH AIOps",
+  "description": "DSH AIOps incident portal with revision-fenced data-source and routing-policy settings",
   "version": "0.1.2-rc.1",
   "publishConfig": {
     "access": "public"

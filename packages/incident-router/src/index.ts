@@ -5,6 +5,7 @@ import { isAbsolute } from 'node:path'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-aiops-observability'
 import {
   LOCALE_PREFERENCE_FIELD,
   LOCALE_SETTINGS_NAMESPACE,
@@ -14,7 +15,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
-import type {} from '@deepseek-ai/dsh-settings'
+import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import {
   WebhookDeliveryId,
   WebhookRuleId,
@@ -40,6 +41,7 @@ export * from './store.ts'
 export type * from './types.ts'
 
 type IncidentSeverity = 'info' | 'warning' | 'critical'
+export const ROUTING_SETTINGS_NAMESPACE = 'aiops-routing'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -76,6 +78,8 @@ export interface Config {
   readonly workspacePath: string
   readonly agentPreset: string
   readonly permissionPreset: string
+  /** Deprecated pre-F.2 field. Accepted only so old profiles can start and migrate to routingPolicy. */
+  readonly alertnameAllowlist?: string[]
   readonly routingPolicy: {
     readonly ignoredAlertnames: string[]
     readonly defaultSeverity: IncidentSeverity
@@ -108,8 +112,67 @@ export interface Config {
   readonly diagnosisWindow: DiagnosisWindowPolicy
 }
 
+/** Versioned live policy persisted through the DSH Settings service. */
+export interface RoutingSettings {
+  readonly version: 1
+  readonly routingPolicy: Config['routingPolicy']
+  readonly severityMap: Config['severityMap']
+  readonly modelBudgets: Config['modelBudgets']
+  readonly stormControl: Config['stormControl']
+}
+
+export interface RoutingPolicyEvaluation {
+  readonly version: 1
+  readonly accepted: boolean
+  readonly alertname: string
+  readonly sourceSeverity?: string
+  readonly severity?: IncidentSeverity
+  readonly reason: 'accepted' | 'alertname-ignored'
+}
+
 const budget = z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)
 const nonNegativeInteger = z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER)
+const defaultRoutingPolicy: Config['routingPolicy'] = {
+  ignoredAlertnames: ['Watchdog', 'InfoInhibitor'],
+  defaultSeverity: 'warning',
+}
+const routingPolicySchema = z.object({
+  ignoredAlertnames: z.array(z.string()).required(),
+  defaultSeverity: z.union(['info', 'warning', 'critical'] as const).required(),
+})
+const severityMapSchema = z.dict(z.union(['info', 'warning', 'critical'] as const))
+const modelBudgetsSchema = z.object({
+  info: budget.required(),
+  warning: budget.required(),
+  critical: budget.required(),
+})
+const stormControlSchema = z.object({
+  cooldownSeconds: nonNegativeInteger.required(),
+  maxQueueSize: budget.required(),
+  maxQueueAgeSeconds: budget.required(),
+  maxDispatchAttempts: budget.required(),
+  retryBackoffSeconds: budget.required(),
+  globalConcurrency: budget.required(),
+  severityConcurrency: z.object({
+    info: budget.required(),
+    warning: budget.required(),
+    critical: budget.required(),
+  }).required(),
+  globalReservedTokens: budget.required(),
+  severityReservedTokens: z.object({
+    info: budget.required(),
+    warning: budget.required(),
+    critical: budget.required(),
+  }).required(),
+})
+
+export const RoutingSettingsConfig: z<RoutingSettings> = z.object({
+  version: z.const(1).required(),
+  routingPolicy: routingPolicySchema.required(),
+  severityMap: severityMapSchema.required(),
+  modelBudgets: modelBudgetsSchema.required(),
+  stormControl: stormControlSchema.required(),
+})
 
 export const Config: z<Config> = z.object({
   source: z.string().required(),
@@ -118,35 +181,13 @@ export const Config: z<Config> = z.object({
   workspacePath: z.string().required(),
   agentPreset: z.string().default('standard'),
   permissionPreset: z.string().default('read-only'),
-  routingPolicy: z.object({
-    ignoredAlertnames: z.array(z.string()).required(),
-    defaultSeverity: z.union(['info', 'warning', 'critical'] as const).required(),
-  }).required(),
-  severityMap: z.dict(z.union(['info', 'warning', 'critical'] as const)).required(),
-  modelBudgets: z.object({
-    info: budget.required(),
-    warning: budget.required(),
-    critical: budget.required(),
-  }).required(),
-  stormControl: z.object({
-    cooldownSeconds: nonNegativeInteger.required(),
-    maxQueueSize: budget.required(),
-    maxQueueAgeSeconds: budget.required(),
-    maxDispatchAttempts: budget.required(),
-    retryBackoffSeconds: budget.required(),
-    globalConcurrency: budget.required(),
-    severityConcurrency: z.object({
-      info: budget.required(),
-      warning: budget.required(),
-      critical: budget.required(),
-    }).required(),
-    globalReservedTokens: budget.required(),
-    severityReservedTokens: z.object({
-      info: budget.required(),
-      warning: budget.required(),
-      critical: budget.required(),
-    }).required(),
-  }).required(),
+  // Schemastery resolves a missing array field to `[]`; accepting that value is
+  // required for clean installs while still preserving old non-empty profiles.
+  alertnameAllowlist: z.array(z.string()),
+  routingPolicy: routingPolicySchema.default(defaultRoutingPolicy),
+  severityMap: severityMapSchema.required(),
+  modelBudgets: modelBudgetsSchema.required(),
+  stormControl: stormControlSchema.required(),
   diagnosisWindow: z.object({
     beforeSeconds: budget.required(),
     afterSeconds: budget.required(),
@@ -156,23 +197,8 @@ export const Config: z<Config> = z.object({
 })
 
 /** Validate values whose relation is not expressed by Schemastery. */
-function assertConfig(config: Config): void {
-  for (const [field, value] of [
-    ['source', config.source],
-    ['ruleId', config.ruleId],
-    ['agentPreset', config.agentPreset],
-    ['permissionPreset', config.permissionPreset],
-  ] as const) {
-    if (value === '' || value.trim() !== value) {
-      throw new Error(`incident-router ${field} must be a non-empty trimmed string`)
-    }
-  }
-  if (config.statePath !== ':memory:' && !isAbsolute(config.statePath)) {
-    throw new Error('incident-router statePath must be absolute or :memory:')
-  }
-  if (!isAbsolute(config.workspacePath)) {
-    throw new Error('incident-router workspacePath must be absolute')
-  }
+export function assertRoutingSettings(config: RoutingSettings): void {
+  if (config.version !== 1) throw new Error('incident-router routing settings version must be 1')
   const alertnames = new Set<string>()
   for (const alertname of config.routingPolicy.ignoredAlertnames) {
     if (alertname === '' || alertname.trim() !== alertname || alertnames.has(alertname)) {
@@ -202,6 +228,58 @@ function assertConfig(config: Config): void {
       throw new Error(`incident-router ${severity} model budget exceeds the global reserved-token budget`)
     }
   }
+}
+
+function settingsFrom(config: Config): RoutingSettings {
+  return structuredClone({
+    version: 1 as const,
+    routingPolicy: config.routingPolicy,
+    severityMap: config.severityMap,
+    modelBudgets: config.modelBudgets,
+    stormControl: config.stormControl,
+  })
+}
+
+export function evaluateRoutingPolicy(
+  labels: Readonly<Record<string, string>>,
+  settings: RoutingSettings,
+): RoutingPolicyEvaluation {
+  assertRoutingSettings(settings)
+  const alertname = labels['alertname'] ?? ''
+  const sourceSeverity = labels['severity']?.trim().toLowerCase()
+  if (settings.routingPolicy.ignoredAlertnames.includes(alertname)) {
+    return { version: 1, accepted: false, alertname, ...(sourceSeverity === undefined ? {} : { sourceSeverity }), reason: 'alertname-ignored' }
+  }
+  const severityByLabel = new Map(Object.entries(settings.severityMap).map(([label, severity]) => [label.toLowerCase(), severity]))
+  return {
+    version: 1,
+    accepted: true,
+    alertname,
+    ...(sourceSeverity === undefined ? {} : { sourceSeverity }),
+    severity: severityByLabel.get(sourceSeverity ?? '') ?? settings.routingPolicy.defaultSeverity,
+    reason: 'accepted',
+  }
+}
+
+/** Validate values whose relation is not expressed by Schemastery. */
+function assertConfig(config: Config): void {
+  for (const [field, value] of [
+    ['source', config.source],
+    ['ruleId', config.ruleId],
+    ['agentPreset', config.agentPreset],
+    ['permissionPreset', config.permissionPreset],
+  ] as const) {
+    if (value === '' || value.trim() !== value) {
+      throw new Error(`incident-router ${field} must be a non-empty trimmed string`)
+    }
+  }
+  if (config.statePath !== ':memory:' && !isAbsolute(config.statePath)) {
+    throw new Error('incident-router statePath must be absolute or :memory:')
+  }
+  if (!isAbsolute(config.workspacePath)) {
+    throw new Error('incident-router workspacePath must be absolute')
+  }
+  assertRoutingSettings(settingsFrom(config))
 }
 
 /** Convert a delivery to the group facts copied into each accepted Session event. */
@@ -290,18 +368,20 @@ export class AiopsIncidentRouter extends Service {
     'agents',
     'agentDefaultModel',
     'agentPresets',
+    'aiopsTelemetry',
     'permissionPresets',
     'sessionPersistence',
     'sessions',
     'sessionTitle',
+    'settings',
     'webhookRuntime',
     'workspaceRegistry',
   ]
   static Config = Config
 
   private readonly store: IncidentRouteStore
-  private readonly ignoredAlertnames: ReadonlySet<string>
-  private readonly severityByLabel: ReadonlyMap<string, IncidentSeverity>
+  private policy: RoutingSettings
+  private readonly policyScope: SettingsScope<RoutingSettings>
   private readonly opening = new Map<string, Promise<Agent>>()
   private readonly active = new Map<string, { severity: 'info' | 'warning' | 'critical'; tokens: number }>()
   private readonly lifecycle = new AbortController()
@@ -313,10 +393,22 @@ export class AiopsIncidentRouter extends Service {
     super(ctx, 'aiopsIncidentRouter')
     assertConfig(config)
     this.store = new IncidentRouteStore(config.statePath)
-    this.ignoredAlertnames = new Set(config.routingPolicy.ignoredAlertnames)
-    this.severityByLabel = new Map(
-      Object.entries(config.severityMap).map(([label, severity]) => [label.toLowerCase(), severity]),
-    )
+    if ((config.alertnameAllowlist?.length ?? 0) > 0) {
+      ctx.logger.warn('incident-router: alertnameAllowlist is deprecated and no longer filters alerts; migrate to routingPolicy.ignoredAlertnames')
+    }
+    const basePolicy = settingsFrom(config)
+    this.policyScope = ctx.settings.register(ROUTING_SETTINGS_NAMESPACE, RoutingSettingsConfig, {
+      base: basePolicy,
+      applies: 'live',
+      validate: assertRoutingSettings,
+    })
+    this.policy = this.policyScope.get()
+    this.applyPolicy(this.policy)
+    ctx.effect(() => this.policyScope.watch((next, previous) => {
+      this.store.recordPolicyChange(previous, next, Date.now())
+      this.applyPolicy(next)
+      void this.drainPending().catch(error => this.ctx.logger.warn(error))
+    }), 'aiopsIncidentRouter.routingPolicy()')
     const disposeRule = ctx.webhookRuntime.register({
       id: WebhookRuleId(config.ruleId),
       kind: 'alertmanager',
@@ -328,11 +420,14 @@ export class AiopsIncidentRouter extends Service {
     })
     ctx.effect(() => async () => {
       this.lifecycle.abort()
+      this.ctx.aiopsTelemetry.markComponent('router', false)
       if (this.wakeTimer !== undefined) clearTimeout(this.wakeTimer)
       await disposeRule()
       await this.drainPromise?.catch(() => {})
       this.store.close()
     }, 'aiopsIncidentRouter.lifecycle()')
+    this.ctx.aiopsTelemetry.markComponent('router', true)
+    this.updateTelemetry()
     queueMicrotask(() => { void this.drainPending().catch(error => this.ctx.logger.warn(error)) })
   }
 
@@ -344,6 +439,21 @@ export class AiopsIncidentRouter extends Service {
   /** Bounded persisted storm-control history for workspace history tools. */
   listControlAudit(input: { limit: number; outcome?: RouteAuditOutcome; query?: string }): RouteAuditRecord[] {
     return this.store.listAudit(input)
+  }
+
+  /** Current versioned live policy, detached for Portal display and dry-run editing. */
+  routingSettings(): RoutingSettings {
+    return structuredClone(this.policy)
+  }
+
+  /** Bounded durable history of committed live policy changes. */
+  listPolicyAudit(input: { limit: number }): import('./store.ts').RoutingPolicyAuditRecord[] {
+    return this.store.listPolicyAudit(input)
+  }
+
+  /** Evaluate normalized labels without enqueueing, dispatching, or changing state. */
+  dryRun(labels: Readonly<Record<string, string>>, settings: RoutingSettings = this.policy): RoutingPolicyEvaluation {
+    return evaluateRoutingPolicy(labels, settings)
   }
 
   /** Route every normalized alert in one authenticated delivery. */
@@ -370,8 +480,8 @@ export class AiopsIncidentRouter extends Service {
         await this.deliverToSession(delivery, alert, prior.route, signal)
         continue
       }
-      const alertname = alert.labels['alertname'] ?? ''
-      if (this.ignoredAlertnames.has(alertname)) {
+      const evaluation = evaluateRoutingPolicy(alert.labels, this.policy)
+      if (!evaluation.accepted) {
         this.store.recordFiltered({
           source: delivery.source,
           deliveryId: delivery.deliveryId,
@@ -382,14 +492,13 @@ export class AiopsIncidentRouter extends Service {
         })
         continue
       }
-      const severityLabel = alert.labels['severity']?.trim().toLowerCase() ?? ''
-      const severity = this.severityByLabel.get(severityLabel) ?? this.config.routingPolicy.defaultSeverity
+      const severity = evaluation.severity!
       const now = Date.now()
       const key = this.fingerprintKey(delivery.source, alert.fingerprint)
       const lastDispatch = this.store.lastDispatchAt(delivery.source, alert.fingerprint)
       const cooldownUntil = lastDispatch === undefined
         ? now
-        : lastDispatch + this.config.stormControl.cooldownSeconds * 1_000
+        : lastDispatch + this.policy.stormControl.cooldownSeconds * 1_000
       const capacityReason = this.capacityReason(severity)
       const reason: RouteControlReason = this.active.has(key)
         || this.store.hasPendingFingerprint(delivery.source, alert.fingerprint)
@@ -397,7 +506,7 @@ export class AiopsIncidentRouter extends Service {
         : cooldownUntil > now
           ? 'cooldown'
           : capacityReason ?? 'ready'
-      this.store.enqueue({
+      const queued = this.store.enqueue({
         source: delivery.source,
         deliveryId: delivery.deliveryId,
         payloadDigest: delivery.event.payloadDigest,
@@ -407,10 +516,14 @@ export class AiopsIncidentRouter extends Service {
         severity,
         reason,
         availableAt: Math.max(now, cooldownUntil),
-        maxQueueSize: this.config.stormControl.maxQueueSize,
+        maxQueueSize: this.policy.stormControl.maxQueueSize,
         now,
       })
+      if (queued === 'dropped') this.ctx.aiopsTelemetry.recordWork('dropped')
+      else if (queued === 'queued' && reason === 'fingerprint-grouped') this.ctx.aiopsTelemetry.recordWork('grouped')
+      else if (queued === 'queued' && reason !== 'ready') this.ctx.aiopsTelemetry.recordWork('deferred')
     }
+    this.updateTelemetry()
     await this.drainPending(signal)
   }
 
@@ -435,7 +548,8 @@ export class AiopsIncidentRouter extends Service {
   private async runDrain(signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
     const now = Date.now()
-    this.store.dropExpired(now, this.config.stormControl.maxQueueAgeSeconds * 1_000)
+    const expired = this.store.dropExpired(now, this.policy.stormControl.maxQueueAgeSeconds * 1_000)
+    if (expired > 0) this.ctx.aiopsTelemetry.recordWork('dropped', expired)
     const starts: Promise<void>[] = []
     for (const group of this.store.readyGroups(now)) {
       signal.throwIfAborted()
@@ -443,23 +557,26 @@ export class AiopsIncidentRouter extends Service {
       if (this.active.has(key)) continue
       const capacityReason = this.capacityReason(group.severity)
       if (capacityReason !== undefined) {
-        this.store.deferGroup(
+        const deferred = this.store.deferGroup(
           group.source,
           group.fingerprint,
           capacityReason,
           now,
           [...this.active.values()].reduce((total, item) => total + item.tokens, 0),
         )
+        if (deferred > 0) this.ctx.aiopsTelemetry.recordWork('deferred', deferred)
         continue
       }
       const work = this.store.claimGroup(group.source, group.fingerprint, now)
       if (work.length === 0) continue
       const severity = highestSeverity(work)
-      const reservation = { severity, tokens: this.config.modelBudgets[severity] }
+      const reservation = { severity, tokens: this.policy.modelBudgets[severity] }
       this.active.set(key, reservation)
+      this.updateTelemetry(now)
       starts.push(this.dispatchGroup(key, work, reservation, signal))
     }
     await Promise.all(starts)
+    this.updateTelemetry()
     this.scheduleWake()
   }
 
@@ -470,6 +587,7 @@ export class AiopsIncidentRouter extends Service {
     signal: AbortSignal,
   ): Promise<void> {
     let agent: Agent | undefined
+    let diagnosisStartedAt: number | undefined
     try {
       const routed = work.map(item => ({
         item,
@@ -490,7 +608,8 @@ export class AiopsIncidentRouter extends Service {
       agent = await this.ensureAgent(first.route, first.item.alert, signal)
       const events: AiopsAlertRouteEvent[] = []
       const startedAt = Date.now()
-      const cooldownUntil = startedAt + this.config.stormControl.cooldownSeconds * 1_000
+      diagnosisStartedAt = startedAt
+      const cooldownUntil = startedAt + this.policy.stormControl.cooldownSeconds * 1_000
       for (const item of routed) {
         this.store.markStarted(item.item, item.route, startedAt, cooldownUntil, reservation.tokens)
         const event = this.routeEvent(item.item, item.route)
@@ -522,23 +641,31 @@ export class AiopsIncidentRouter extends Service {
       const completedAt = Date.now()
       for (const item of routed) this.store.markCompleted(item.item, item.route, completedAt, reservation.tokens)
     } catch (error: unknown) {
+      this.ctx.aiopsTelemetry.recordDispatchFailure()
       const now = Date.now()
       const message = error instanceof Error ? error.message : String(error)
       for (const item of work) {
         this.store.retryOrDrop(
           item,
           now,
-          now + this.config.stormControl.retryBackoffSeconds * 1_000,
-          this.config.stormControl.maxDispatchAttempts,
+          now + this.policy.stormControl.retryBackoffSeconds * 1_000,
+          this.policy.stormControl.maxDispatchAttempts,
           message,
         )
       }
+      this.ctx.aiopsTelemetry.recordWork(
+        work.every(item => item.attempt >= this.policy.stormControl.maxDispatchAttempts) ? 'dropped' : 'deferred',
+        work.length,
+      )
       this.release(key)
       this.scheduleWake()
       throw error
     }
     const settled = agent?.whenIdle() ?? Promise.resolve()
     void settled.finally(() => {
+      if (diagnosisStartedAt !== undefined) {
+        this.ctx.aiopsTelemetry.observeDiagnosticLatency((Date.now() - diagnosisStartedAt) / 1_000)
+      }
       this.release(key)
       void this.drainPending().catch(error => this.ctx.logger.warn(error))
     })
@@ -573,21 +700,36 @@ export class AiopsIncidentRouter extends Service {
   | 'severity-token-budget'
   | undefined {
     const reservations = [...this.active.values()]
-    if (reservations.length >= this.config.stormControl.globalConcurrency) return 'global-concurrency'
+    if (reservations.length >= this.policy.stormControl.globalConcurrency) return 'global-concurrency'
     const same = reservations.filter(item => item.severity === severity)
-    if (same.length >= this.config.stormControl.severityConcurrency[severity]) return 'severity-concurrency'
+    if (same.length >= this.policy.stormControl.severityConcurrency[severity]) return 'severity-concurrency'
     const globalTokens = reservations.reduce((total, item) => total + item.tokens, 0)
-    if (globalTokens + this.config.modelBudgets[severity] > this.config.stormControl.globalReservedTokens) {
+    if (globalTokens + this.policy.modelBudgets[severity] > this.policy.stormControl.globalReservedTokens) {
       return 'global-token-budget'
     }
     const severityTokens = same.reduce((total, item) => total + item.tokens, 0)
-    if (severityTokens + this.config.modelBudgets[severity]
-      > this.config.stormControl.severityReservedTokens[severity]) return 'severity-token-budget'
+    if (severityTokens + this.policy.modelBudgets[severity]
+      > this.policy.stormControl.severityReservedTokens[severity]) return 'severity-token-budget'
     return undefined
   }
 
   private release(key: string): void {
     this.active.delete(key)
+    this.updateTelemetry()
+  }
+
+  private applyPolicy(next: RoutingSettings): void {
+    assertRoutingSettings(next)
+    this.policy = structuredClone(next)
+  }
+
+  private updateTelemetry(now = Date.now()): void {
+    const queue = this.store.queueStats(now)
+    this.ctx.aiopsTelemetry.setRouterGauges({
+      ...queue,
+      activeDiagnoses: this.active.size,
+      reservedTokens: [...this.active.values()].reduce((total, item) => total + item.tokens, 0),
+    })
   }
 
   private scheduleWake(): void {
@@ -678,7 +820,7 @@ export class AiopsIncidentRouter extends Service {
     const selection = this.ctx.agentDefaultModel.currentSelection()
     const agentOptions = {
       ...selection,
-      maxTokens: this.config.modelBudgets[route.severity],
+      maxTokens: this.policy.modelBudgets[route.severity],
     }
     const setup = async (agentCtx: Context): Promise<void> => {
       await this.ctx.agentPresets.mount(agentCtx, preset.id)

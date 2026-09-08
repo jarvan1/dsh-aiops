@@ -4,6 +4,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createHash, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CredentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-aiops-observability'
 import {
   WebhookDeliveryId,
   WebhookSourceId,
@@ -79,6 +80,11 @@ export function createAlertmanagerWebhookHandler(
   config: AlertmanagerWebhookHandlerConfig,
 ): WebRoute['handler'] {
   return async (request, response) => {
+    let recorded = false
+    const record = (outcome: 'accepted' | 'authentication_failed' | 'rejected' | 'dispatch_failed') => {
+      ctx.aiopsTelemetry.recordWebhook(outcome)
+      recorded = true
+    }
     try {
       if (request.method !== 'POST') {
         response.setHeader('allow', 'POST')
@@ -93,6 +99,7 @@ export function createAlertmanagerWebhookHandler(
         throw new AlertmanagerWebhookHttpError(503, 'Alertmanager webhook secret is unavailable')
       }
       if (!validBearer(authorization, credential.value)) {
+        record('authentication_failed')
         throw new AlertmanagerWebhookHttpError(401, 'invalid bearer credential')
       }
       const body = await readBoundedUtf8Body(request, config.maxBodyBytes)
@@ -110,11 +117,14 @@ export function createAlertmanagerWebhookHandler(
       try {
         ctx.webhookRuntime.dispatch(delivery)
       } catch {
+        record('dispatch_failed')
         ctx.logger.warn('webhook-alertmanager: dispatch unavailable')
         throw new AlertmanagerWebhookHttpError(503, 'webhook runtime is unavailable')
       }
+      record('accepted')
       respond(response, 202)
     } catch (error: unknown) {
+      if (!recorded) record('rejected')
       if (error instanceof AlertmanagerWebhookHttpError) {
         respond(response, error.status, error.message)
         return

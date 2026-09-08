@@ -22,7 +22,7 @@
 .headerSettingsActive { border-color: var(--dsw-alias-state-business-primary) !important; color: var(--dsw-alias-state-business-primary) !important; }
 .closeButton { width: 34px; padding: 0 !important; font-size: 22px !important; line-height: 1; }
 
-.portal button, .portal input, .portal select { box-sizing: border-box; min-height: 34px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 8px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); font: inherit; }
+.portal button, .portal input, .portal select, .portal textarea { box-sizing: border-box; min-height: 34px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 8px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-1); font: inherit; }
 .portal button { padding: 0 13px; cursor: pointer; }
 .portal button:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .portal button:disabled { opacity: .55; cursor: default; }
@@ -142,6 +142,20 @@
 .settingsFooter button { min-width: 130px; min-height: 40px; border-color: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-primary-inverted); background: var(--dsw-alias-state-business-primary); }
 .settingsFooter button:hover { background: var(--dsw-alias-state-business-primary); filter: brightness(1.06); }
 .saveMessage { min-height: 20px; margin-top: 5px; color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.policyGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.policyCard { display: grid; grid-template-rows: auto auto; align-content: start; gap: 12px; padding: 18px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.policyEditor { width: 100%; min-height: 128px; padding: 11px 12px; outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important; font-size: 12px !important; line-height: 19px; resize: vertical; tab-size: 2; }
+.policyEditorLarge { min-height: 220px; }
+.policyEditor::placeholder { color: var(--dsw-alias-label-tertiary); opacity: .62; }
+.policyEditor:focus, .policySelect:focus { border-color: var(--dsw-alias-state-business-primary); }
+.policySelect { align-self: start; width: 100%; height: 42px; min-height: 42px !important; padding: 0 12px; outline: none; }
+.policyWide { grid-column: 1 / -1; }
+.policyActions { display: flex; gap: 8px; }
+.policyAudit { margin-top: 20px; padding: 16px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.policyAudit h3 { margin: 0 0 10px; font-size: 14px; }
+.policyAudit p { color: var(--dsw-alias-label-tertiary); font-size: 13px; }
+.policyAudit ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.policyAudit li { display: grid; grid-template-columns: 180px minmax(0, 1fr) 180px; gap: 10px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 
 @keyframes aiopsPortalSpin { to { transform: rotate(360deg); } }
 
@@ -156,6 +170,8 @@
   .filters > span { text-align: left; }
   .content { grid-template-columns: 1fr; }
   .endpointGrid { grid-template-columns: 1fr; }
+  .policyGrid { grid-template-columns: 1fr; }
+  .policyWide { grid-column: auto; }
   .auditTable { overflow-x: auto; }
   .auditHead, .auditRow { min-width: 760px; }
 }

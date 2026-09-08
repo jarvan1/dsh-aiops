@@ -22,20 +22,21 @@ kind: "package-group"
 <a id="packages"></a>
 ## 包
 
-十二个包覆盖入口、路由、采集、模型交互、随包诊断 skill、持久状态、历史读取、Portal 与组合。
+十三个包覆盖入口、路由、采集、模型交互、随包诊断 skill、持久状态、历史读取、产品遥测、Portal 与组合。
 
 | 包 | 职责 | ctx key 或贡献 |
 |---|---|---|
 | [`aiops-http-read/`](aiops-http-read/README.zh.md) | 共享的有界只读 HTTP 采集 | 无状态库 |
 | [`aiops-alertmanager/`](aiops-alertmanager/README.zh.md) | 只读当前告警 Service Definition 与 HTTP Provider | `ctx.alertmanager` |
-| [`aiops-prometheus/`](aiops-prometheus/README.zh.md) | 只读 PromQL Service Definition 与 HTTP Provider | `ctx.prometheus` |
+| [`aiops-prometheus/`](aiops-prometheus/README.zh.md) | 只读 PromQL、规则、Target 与元数据 Service Definition 和 HTTP Provider | `ctx.prometheus` |
 | [`aiops-kubernetes/`](aiops-kubernetes/README.zh.md) | 默认直连 Kubernetes API、可选 kubectl 兼容的只读 Provider | `ctx.kubernetes` |
-| [`tool-aiops-observe/`](tool-aiops-observe/README.zh.md) | 七个面向模型的观测工具 | `ctx.tools` |
+| [`tool-aiops-observe/`](tool-aiops-observe/README.zh.md) | 十个面向模型的观测工具 | `ctx.tools` |
 | [`aiops-incident/`](aiops-incident/README.zh.md) | 完整报告、追加式反馈、投影与写入工具 | `aiops/incident-state`、`aiops/operator-feedback` |
 | [`tool-aiops-history/`](tool-aiops-history/README.zh.md) | 工作区范围的报告、反馈与路由审计工具 | 基于 `ctx.sessionQuery` 与 router 的 `ctx.tools` |
-| [`aiops-portal/`](aiops-portal/README.zh.md) | Web 内只读事件概览、筛选、详情与路由审计 | `conversation.view`、`/api/aiops/portal` |
+| [`aiops-portal/`](aiops-portal/README.zh.md) | 只读事件及带 revision fence 的数据源/路由设置与 dry-run | `conversation.view`、`/api/aiops/portal` |
+| [`aiops-observability/`](aiops-observability/README.zh.md) | 低基数存活、就绪与 Prometheus 遥测 | `ctx.aiopsTelemetry`、`/api/aiops/{healthz,readyz,metrics}` |
 | [`webhook-alertmanager/`](webhook-alertmanager/README.zh.md) | Bearer 认证、有界的 Alertmanager v4 HTTP adapter | `ctx.webhookRuntime.dispatch()` |
-| [`incident-router/`](incident-router/README.zh.md) | fingerprint 轮次、重放防护、持久队列、风暴控制与确定性 Session 生命周期 | `ctx.aiopsIncidentRouter` |
+| [`incident-router/`](incident-router/README.zh.md) | fingerprint 轮次、重放防护、持久队列、版本化实时策略/审计、风暴控制与确定性 Session 生命周期 | `ctx.aiopsIncidentRouter` |
 | [`skill-k8s-diag/`](skill-k8s-diag/README.zh.md) | 跨 Workspace 可用的版本化通用告警时间锚诊断流程；包路径因兼容性保留 | `aiops-diag` skill |
 | [`aiops/`](aiops/README.zh.md) | 包含运行时行并启用派生索引的可安装 profile patch | `dsh.bundle.patch` |
 
@@ -43,6 +44,8 @@ kind: "package-group"
 ## 相关文档
 
 - [AIOps 子系统](../docs/aiops.zh.md)——完整运行时流程、状态模型与第一版边界。
+- [生产部署与升级](../docs/deployment.zh.md)——Host/TLS、凭据、迁移与验证。
+- [可重复 Alertmanager/k3s 矩阵](../deploy/alertmanager/README.zh.md)——带门槛的真实 receiver 测试。
 - [AIOps 基础决策](../docs/decisions/2026-09-04-dsh-aiops-read-only-foundation.zh.md)——包拓扑与安全依据。
 - [Packages](../README.zh.md)——顶层 workspace 导航。
 

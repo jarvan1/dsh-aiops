@@ -32,17 +32,21 @@ function fakeContext(secret: string | undefined = 'secret'): {
   ctx: Context
   dispatch: ReturnType<typeof vi.fn>
   warnings: ReturnType<typeof vi.fn>
+  telemetry: ReturnType<typeof vi.fn>
 } {
   const dispatch = vi.fn()
   const warnings = vi.fn()
+  const telemetry = vi.fn()
   return {
     ctx: {
       credentials: { resolve: async () => secret === undefined ? undefined : { value: secret, source: 'test' } },
       webhookRuntime: { dispatch },
+      aiopsTelemetry: { recordWebhook: telemetry },
       logger: { warn: warnings },
     } as unknown as Context,
     dispatch,
     warnings,
+    telemetry,
   }
 }
 
@@ -84,6 +88,7 @@ describe('Alertmanager webhook HTTP handler', () => {
     expect(response.status).toBe(202)
     expect(await response.text()).toBe('')
     expect(fake.dispatch).toHaveBeenCalledOnce()
+    expect(fake.telemetry).toHaveBeenCalledWith('accepted')
     expect(fake.dispatch.mock.calls[0]?.[0]).toMatchObject({
       kind: 'alertmanager',
       source: 'primary-alertmanager',
@@ -113,6 +118,7 @@ describe('Alertmanager webhook HTTP handler', () => {
     const response = await post(await serve(fake.ctx), body(), options)
     expect(response.status).toBe(status)
     expect(fake.dispatch).not.toHaveBeenCalled()
+    expect(fake.telemetry).toHaveBeenCalledWith(status === 401 ? 'authentication_failed' : 'rejected')
   })
 
   it('rejects unavailable credentials, oversized bodies, and invalid payloads', async () => {
@@ -129,6 +135,7 @@ describe('Alertmanager webhook HTTP handler', () => {
     fake.dispatch.mockImplementation(() => { throw new Error('closed') })
     const response = await post(await serve(fake.ctx), body())
     expect(response.status).toBe(503)
+    expect(fake.telemetry).toHaveBeenCalledWith('dispatch_failed')
     expect(fake.warnings).toHaveBeenCalledWith('webhook-alertmanager: dispatch unavailable')
     expect(JSON.stringify(fake.warnings.mock.calls)).not.toContain('pod restarts')
   })

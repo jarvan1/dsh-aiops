@@ -35,9 +35,9 @@ kubernetes_*        -> ctx.kubernetes   -> 原生 kubeconfig 客户端 -> Kubern
                     |
  incident history / feedback history / routing audit
                     |
-       same-origin read-only Portal snapshot
+       同源 Portal snapshot + revision fence 设置
                     |
-       overview / filters / detail / route audit
+ overview / detail / route audit / 路由策略 dry-run
 ```
 
 观测工具返回有界的规范 JSON 或原样有界日志文本，并且不接受变更动词、URL、shell 字符串、不受限的 kubectl 参数或流式模式。agent 把相关观测转换成证据记录，在假设中引用这些 ID、给出明确置信度，并仅把拟议操作存为供人工审核的建议。
@@ -48,6 +48,8 @@ Alertmanager adapter 只接受经过认证且有界的 v4 JSON。它会校验 Pr
 
 SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Session ID。符合策略的告警在创建 Agent 前进入持久队列；同 fingerprint/status 的就绪项分组，并受 fingerprint 冷却、队列时效/容量、全局及 severity 并发和在途 Token 预留限制。critical 优先，同 severity 保持 FIFO；重启会恢复处理中工作。每次过滤、延迟、分组、丢弃、启动、完成与失败都有审计。
 
+版本化 `aiops-routing` 设置可在无需重启的情况下修改噪声排除、severity 归一/默认值、冷却、队列/重试、并发与 Token 预算。Portal 要求先成功执行一次无副作用 label dry-run，再以 revision fence 原子保存；Router 校验跨字段上限、实时应用提交，并在持久策略审计中记录前后 hash 与变更字段。
+
 首次 firing 创建第 1 轮；重复 firing 与 resolved 通知追加到同一个 Session；resolved 后再次 firing 会打开新一轮。`resolved` 仅表示告警表达式恢复。每个被接受的决策和标准化告警都会在模型可见 follow-up 前追加为 `aiops/alert-routed` v2。事件把 `startsAt` 规范化为 T0，并携带一组可稳定重放的窗口，以及明确的 Prometheus range、Kubernetes Event 和 Pod 日志参数。
 
 ## Capability 角色
@@ -56,10 +58,11 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 |---|---|---|
 | 告警投递 | [`dsh-webhook-alertmanager`](../packages/webhook-alertmanager/README.zh.md)、隔离 HTTP listener、`ctx.webhookRuntime` | [`dsh-aiops-incident-router`](../packages/incident-router/README.zh.md)、`ctx.aiopsIncidentRouter` |
 | Alertmanager 告警 | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.zh.md)、`ctx.alertmanager`、HTTP API v2 | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `alertmanager_alerts` |
-| Prometheus 查询 | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.zh.md)、`ctx.prometheus`、HTTP 查询 API | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `prometheus_query`、`prometheus_query_range` |
+| Prometheus 观测 | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.zh.md)、`ctx.prometheus`、有界 HTTP 查询/发现 API | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `prometheus_query`、`prometheus_query_range`、`prometheus_rules`、`prometheus_targets`、`prometheus_discovery` |
 | Kubernetes 读取 | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.zh.md)、`ctx.kubernetes`、官方原生 API 客户端（另有可选 kubectl 兼容子路径） | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `kubernetes_get`、`kubernetes_list`、`kubernetes_events`、`kubernetes_logs` |
 | 诊断流程 | 全局注册的随包 [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.zh.md) | `aiops-diag` 动态选择 Alertmanager、Prometheus、服务与 Kubernetes 证据分支 |
-| 运维 Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.zh.md)、固定同源 `/api/aiops/portal` | DSH Web 常驻侧边栏入口、Session 视图与实时数据源设置 |
+| 运维 Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.zh.md)、固定同源 `/api/aiops/portal` | DSH Web 常驻侧边栏入口、Session 视图、实时数据源/路由设置与 dry-run |
+| 产品自观测 | [`dsh-aiops-observability`](../packages/aiops-observability/README.zh.md)、`ctx.aiopsTelemetry` | `/api/aiops/healthz`、`/api/aiops/readyz` 与低基数 `/api/aiops/metrics` |
 
 每个 capability 都把 Service Definition 与当前 Provider 合并在一个包中，因为它们目前作为同一关注点演进。出现第二种传输或远程执行 Provider 时再拆分 Provider 包；Consumer 已经只依赖抽象 Service。
 
@@ -71,21 +74,21 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 ## 持久化、数据库与 RAG
 
-该子系统复用 DSH Session 持久化保存诊断真源。JSONL 存储路由告警事件、模型可见消息、工具观测、事件状态和操作员反馈；`ctx.sessionProjections` 提供当前状态。`aiops-router.sqlite` 拥有 delivery 重放、队列、风暴控制审计和 fingerprint 到轮次的协调状态。Bundle 在 `aiops-incidents.sqlite` 启用 `dsh-session-query-sqlite`；`dsh-tool-aiops-history` 将工具读取限制在调用方工作区。Portal 不增加数据库，其接口固定读取 Router 配置的诊断工作区，并对会话、事件和审计扫描设置上限。
+该子系统复用 DSH Session 持久化保存诊断真源。JSONL 存储路由告警事件、模型可见消息、工具观测、事件状态和操作员反馈；`ctx.sessionProjections` 提供当前状态。`aiops-router.sqlite` 拥有 delivery 重放、队列、风暴控制/路由策略审计和 fingerprint 到轮次的协调状态。Bundle 在 `aiops-incidents.sqlite` 启用 `dsh-session-query-sqlite`；`dsh-tool-aiops-history` 将工具读取限制在调用方工作区。Portal 不增加数据库，其接口固定读取 Router 配置的诊断工作区，并对会话、事件和审计扫描设置上限。
 
 RAG 暂缓，因为该闭环从实时运维状态进行诊断，目前还没有经过验证的运维手册语料库。只有在具备维护中的语料、访问策略、引用、时效规则与评测集后才应增加检索；检索应贡献证据或操作员指导，绝不能绕过只读工具与审批策略。
 
 ## 安全边界
 
-该包组不包含 Alertmanager 写入、Kubernetes 变更、exec、任意命令、流式日志跟随、自动修复或绕过审批的路径。部署仍负责网络 ACL、Alertmanager 与 Prometheus 访问、kubeconfig 选择及只读 Kubernetes RBAC。Provider 配置属于可信应用组合，而模型输入会在 I/O 前受到约束与校验。
+该包组不包含 Alertmanager 写入、Kubernetes 变更、exec、任意命令、流式日志跟随、自动修复或绕过审批的路径。Portal 永不返回 webhook bearer 明文，只暴露 URL 和是否已配置；连接测试与 dry-run POST 会拒绝跨站浏览器请求。部署仍负责 DSH Host 认证边界、TLS 与反向代理 header、网络 ACL、Alertmanager/Prometheus 访问、kubeconfig、凭据轮换及只读 Kubernetes RBAC。详见[生产部署与升级](deployment.zh.md)。
 
 ## 当前限制
 
 - 告警：提供认证 Alertmanager v4 入口与当前告警读取；没有静默或变更 API。
-- 指标：仅有 PromQL 即时与范围查询；没有规则或元数据 API。
+- 指标：提供有界 PromQL 即时/范围查询，以及规则、Target、label 与 series 发现；没有 Prometheus 写入或无约束元数据扫描。
 - 集群：仅有对象 get/list、绝对窗口 Event 与有界绝对窗口非流式 Pod 日志；没有 watch、发现、exec 或拓扑图。
 - 状态：每个告警轮次一个事件；告警表达式恢复后再次 firing 会打开新的 Session 轮次。反馈为显式追加事件，不自动训练模型。跨 Session 历史保持只读并受工作区限制，不提供合并、聚合分析或工单系统同步。
-- 体验：Web profile 提供始终可访问的只读 AIOps Portal，以及实时生效并持久化的 Prometheus/Alertmanager 设置；当前不支持 Electron，也不在 Portal 内提交反馈或修复动作。
+- 体验：Web profile 提供始终可访问的 AIOps Portal、实时持久化数据源设置，以及带 revision fence 的路由策略管理；事件内容仍只读，当前不支持 Electron，也不在 Portal 内提交反馈或修复动作。
 - 动作：建议只是供人工审核的文本；没有自动修复。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
@@ -210,3 +213,5 @@ Source: [`packages/aiops-prometheus/src/index.ts`](../packages/aiops-prometheus/
 - [时间锚诊断决策](decisions/2026-09-06-time-anchored-diagnosis.zh.md)——T0/窗口派生、有界 Kubernetes 读取与随包 skill 可用性。
 - [反馈与告警风暴控制决策](decisions/2026-09-06-operator-feedback-storm-control.zh.md)——追加式审核、队列、资源预算和审计语义。
 - [AIOps Portal 决策](decisions/2026-09-06-aiops-portal.zh.md)——同源接口、工作区范围和只读 UI 边界。
+- [生产部署与升级](deployment.zh.md)——Host/TLS 边界、凭据轮换、迁移与发布流程。
+- [可重复 Alertmanager/k3s 矩阵](../deploy/alertmanager/README.zh.md)——带门槛的真实 receiver 与重启流程。

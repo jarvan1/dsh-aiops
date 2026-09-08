@@ -9,7 +9,8 @@ import {
 } from '@deepseek-ai/dsh-webhook'
 import type { AlertmanagerAlert, AlertmanagerWebhookEvent } from '@deepseek-ai/dsh-webhook-alertmanager'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import AiopsIncidentRouter, { type Config } from '../src/index.ts'
+import z from '@deepseek-ai/schemastery'
+import AiopsIncidentRouter, { Config as RouterConfig, type Config, type RoutingSettings } from '../src/index.ts'
 
 const contexts: Context[] = []
 
@@ -136,6 +137,7 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
   create: ReturnType<typeof vi.fn>
   resume: ReturnType<typeof vi.fn>
   attach: ReturnType<typeof vi.fn>
+  updatePolicy: (next: RoutingSettings) => void
   router: AiopsIncidentRouter
 } {
   const ctx = new Context()
@@ -154,6 +156,8 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     return { agent, dispose: async () => { agents.delete(input.resumeSessionId) } }
   })
   const attach = vi.fn(async () => {})
+  let routingSettings: RoutingSettings | undefined
+  const policyWatchers = new Set<(next: RoutingSettings, previous: RoutingSettings) => void>()
   ctx.provide('agents', {
     get: (id: string) => agents.get(id),
     create,
@@ -173,6 +177,18 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     get: (namespace: string) => namespace === 'locale'
       ? options.locale === undefined ? {} : { preference: options.locale }
       : undefined,
+    register: (_namespace: string, _schema: unknown, registration: { base?: unknown }) => {
+      routingSettings = registration.base as RoutingSettings
+      return {
+      get: () => routingSettings,
+      watch: (callback: (next: RoutingSettings, previous: RoutingSettings) => void) => {
+        policyWatchers.add(callback)
+        return () => { policyWatchers.delete(callback) }
+      },
+      update: vi.fn(),
+      replace: vi.fn(),
+      }
+    },
   } as never)
   ctx.provide('sessions', { flush: async () => true } as never)
   ctx.provide('sessionTitle', { rename: vi.fn() } as never)
@@ -185,6 +201,13 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
       return async () => {}
     },
   } as never)
+  ctx.provide('aiopsTelemetry', {
+    markComponent: vi.fn(),
+    recordWork: vi.fn(),
+    recordDispatchFailure: vi.fn(),
+    setRouterGauges: vi.fn(),
+    observeDiagnosticLatency: vi.fn(),
+  } as never)
   const router = new AiopsIncidentRouter(ctx, options.config ?? config)
   return {
     ctx,
@@ -196,11 +219,57 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     create,
     resume,
     attach,
+    updatePolicy: (next) => {
+      const previous = routingSettings!
+      routingSettings = next
+      for (const watcher of policyWatchers) watcher(next, previous)
+    },
     router,
   }
 }
 
 describe('AIOps incident router', () => {
+  it('declares the settings service used to register its live policy scope', () => {
+    expect(AiopsIncidentRouter.inject).toContain('settings')
+  })
+
+  it('loads the pre-F.2 allowlist shape with safe general-routing defaults for migration', () => {
+    const { routingPolicy: _removed, ...legacy } = config
+    const [migrated] = z.resolve({ ...legacy, alertnameAllowlist: ['TargetDown'] }, RouterConfig)
+    expect(migrated.routingPolicy).toEqual({
+      ignoredAlertnames: ['Watchdog', 'InfoInhibitor'],
+      defaultSeverity: 'warning',
+    })
+    const migratedRouter = harness({ config: migrated }).router
+    expect(migratedRouter.dryRun({ alertname: 'TargetDown' })).toMatchObject({ accepted: true, severity: 'warning' })
+    expect(migratedRouter.dryRun({ alertname: 'Watchdog' })).toMatchObject({ accepted: false, reason: 'alertname-ignored' })
+    const [cleanInstall] = z.resolve(config, RouterConfig)
+    expect(cleanInstall.alertnameAllowlist).toEqual([])
+  })
+
+  it('applies versioned routing settings live, supports dry-run, and audits changes', async () => {
+    const test = harness()
+    const current = test.router.routingSettings()
+    const next: RoutingSettings = {
+      ...current,
+      routingPolicy: { ignoredAlertnames: ['VendorHeartbeat'], defaultSeverity: 'critical' },
+    }
+    expect(test.router.dryRun({ alertname: 'VendorHeartbeat' }, next)).toMatchObject({
+      accepted: false,
+      reason: 'alertname-ignored',
+    })
+    test.updatePolicy(next)
+    await test.rule().run(delivery('policy-filtered', 'firing', alert('firing', {
+      labels: { alertname: 'VendorHeartbeat' },
+      fingerprint: 'aaaaaaaaaaaaaaaa',
+    })), new AbortController().signal)
+    expect(test.create).not.toHaveBeenCalled()
+    expect(test.router.routingSettings()).toEqual(next)
+    expect(test.router.listPolicyAudit({ limit: 10 })).toEqual([
+      expect.objectContaining({ version: 1, changedFields: ['routingPolicy'], previous: current, next }),
+    ])
+  })
+
   it('creates one deterministic Session and appends later firing and resolved deliveries', async () => {
     const test = harness()
     const signal = new AbortController().signal

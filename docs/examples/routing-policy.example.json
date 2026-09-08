@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "routingPolicy": {
+    "ignoredAlertnames": [
+      "Watchdog",
+      "InfoInhibitor"
+    ],
+    "defaultSeverity": "warning"
+  },
+  "severityMap": {
+    "debug": "info",
+    "info": "info",
+    "notice": "info",
+    "warn": "warning",
+    "warning": "warning",
+    "error": "critical",
+    "critical": "critical",
+    "fatal": "critical",
+    "page": "critical"
+  },
+  "modelBudgets": {
+    "info": 2048,
+    "warning": 4096,
+    "critical": 8192
+  },
+  "stormControl": {
+    "cooldownSeconds": 60,
+    "maxQueueSize": 100,
+    "maxQueueAgeSeconds": 900,
+    "maxDispatchAttempts": 3,
+    "retryBackoffSeconds": 10,
+    "globalConcurrency": 4,
+    "severityConcurrency": {
+      "info": 1,
+      "warning": 2,
+      "critical": 4
+    },
+    "globalReservedTokens": 24576,
+    "severityReservedTokens": {
+      "info": 2048,
+      "warning": 8192,
+      "critical": 24576
+    }
+  }
+}

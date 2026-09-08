@@ -25,10 +25,12 @@ describe.skipIf(namespace === undefined || pod === undefined)('real read-only Cr
     const observedAt = Date.now()
     const sinceTime = new Date(observedAt - 60 * 60 * 1_000).toISOString()
     const untilTime = new Date(observedAt).toISOString()
-    const object = await runtime.get({ cwd: process.cwd(), resource: 'pod', name: pod!, namespace })
-    const container = crashLoopContainer(object)
-
-    expect(container).toBeTypeOf('string')
+    const container = await waitForCrashLoopContainer(runtime, {
+      cwd: process.cwd(),
+      resource: 'pod',
+      name: pod!,
+      namespace,
+    })
     const events = await runtime.events({
       cwd: process.cwd(),
       namespace,
@@ -51,8 +53,21 @@ describe.skipIf(namespace === undefined || pod === undefined)('real read-only Cr
     const previous = await runtime.logs(runtime.resolveLogs({ ...base, previous: true }))
     expect(typeof current).toBe('string')
     expect(typeof previous).toBe('string')
-  }, 60_000)
+  }, 90_000)
 })
+
+async function waitForCrashLoopContainer(
+  runtime: NativeKubernetesRuntime,
+  request: { cwd: string; resource: string; name: string; namespace: string },
+): Promise<string> {
+  const deadline = Date.now() + 75_000
+  while (Date.now() < deadline) {
+    const container = crashLoopContainer(await runtime.get(request))
+    if (container !== undefined) return container
+    await new Promise(resolve => setTimeout(resolve, 250))
+  }
+  throw new Error(`Pod ${request.namespace}/${request.name} did not enter CrashLoopBackOff within 75 seconds`)
+}
 
 function crashLoopContainer(value: JsonValue): string | undefined {
   const root = objectValue(value)

@@ -25,4 +25,6 @@
 
 `stormControl` 配置 fingerprint 冷却秒数、队列大小/时效、失败重试次数/退避、全局和分 severity 并发，以及全局和分 severity 的在途模型 Token 预留上限。单次 `modelBudgets` 必须能放入对应的 Token 上限，severity 并发不能超过全局并发。`diagnosisWindow` 设置锚点前后秒数、Prometheus 分辨率秒数，以及写入每个路由事件的 Pod 日志行数上限。
 
+运行时 Router 会在组合值之上注册 `aiops-routing` version 1 设置。Portal 对噪声排除、severity 归一/默认值、模型预算、冷却、队列、并发和预留的修改会先校验并使用 revision fence，随后实时生效，并写入不含 secret 的 `routing_policy_audit`。`dryRun()` 只评估标准化 labels，不写队列、审计或 Session。包含旧 `alertnameAllowlist` 的 F.2 前 profile 仍能以安全通用默认值启动并输出弃用警告；升级后应把旧字段替换成显式 `routingPolicy`。
+
 数据库职责与重启语义见[路由决策](../../docs/decisions/2026-09-06-alertmanager-session-routing.zh.md)，风暴控制与反馈边界见[阶段 E 决策](../../docs/decisions/2026-09-06-operator-feedback-storm-control.zh.md)。

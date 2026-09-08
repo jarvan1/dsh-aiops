@@ -40,11 +40,17 @@
   },
   "scripts": {
     "clean": "node scripts/clean.mjs",
-    "build": "pnpm run clean && tsc -p packages/aiops-http-read && tsc -p packages/aiops-alertmanager && tsc -p packages/aiops-prometheus && tsc -p packages/aiops-kubernetes && tsc -p packages/aiops-incident && tsc -p packages/tool-aiops-observe && tsc -p packages/webhook-alertmanager && tsc -p packages/incident-router && tsc -p packages/tool-aiops-history && tsc -p packages/aiops-portal && node scripts/build-portal.mjs && tsc -p packages/skill-k8s-diag && tsc -p packages/aiops",
+    "build": "pnpm run clean && tsc -p packages/aiops-http-read && tsc -p packages/aiops-observability && tsc -p packages/aiops-alertmanager && tsc -p packages/aiops-prometheus && tsc -p packages/aiops-kubernetes && tsc -p packages/aiops-incident && tsc -p packages/tool-aiops-observe && tsc -p packages/webhook-alertmanager && tsc -p packages/incident-router && tsc -p packages/tool-aiops-history && tsc -p packages/aiops-portal && node scripts/build-portal.mjs && tsc -p packages/skill-k8s-diag && tsc -p packages/aiops",
     "build:github": "pnpm run build && node scripts/prepare-github.mjs",
     "typecheck": "pnpm run build",
     "test": "pnpm run build && vitest run",
     "docs:check": "node scripts/check-links.mjs",
+    "e2e:k3s:setup": "node scripts/aiops-e2e.mjs setup",
+    "e2e:k3s:exercise": "node scripts/aiops-e2e.mjs exercise",
+    "e2e:k3s:verify": "node scripts/aiops-e2e.mjs verify",
+    "e2e:k3s:seed-restart": "node scripts/aiops-e2e.mjs seed-restart",
+    "e2e:k3s:verify-restart": "node scripts/aiops-e2e.mjs verify-restart",
+    "e2e:k3s:cleanup": "node scripts/aiops-e2e.mjs cleanup",
     "pack:bundle": "pnpm --filter @deepseek-ai/dsh-aiops pack",
     "prepare": "pnpm run build:github"
   },

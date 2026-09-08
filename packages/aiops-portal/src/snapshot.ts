@@ -39,6 +39,8 @@ export async function readPortalSnapshot(
   const workspace = ctx.aiopsIncidentRouter.workspacePath
   const sessions = await ctx.sessionQuery.filterSessions([{ kind: 'cwd', values: [workspace] }], signal)
   const audit = ctx.aiopsIncidentRouter.listControlAudit({ limit: limits.maxAuditRecords })
+  const routingSettings = ctx.aiopsIncidentRouter.routingSettings()
+  const routingPolicyAudit = ctx.aiopsIncidentRouter.listPolicyAudit({ limit: limits.maxAuditRecords })
   const latestRouteBySession = new Map<string, RouteAuditRecord>()
   for (const record of audit) {
     if (record.sessionId !== undefined && !latestRouteBySession.has(record.sessionId)) {
@@ -81,11 +83,13 @@ export async function readPortalSnapshot(
   incidents.sort((left, right) => right.reportTime - left.reportTime || right.reportSeq - left.reportSeq)
   const bounded = incidents.slice(0, limits.maxIncidents)
   return {
-    version: 1,
+    version: 2,
     workspace,
     generatedAt: Date.now(),
     summary: summarizePortal(bounded, audit),
     incidents: bounded,
     audit,
+    routingSettings,
+    routingPolicyAudit,
   }
 }

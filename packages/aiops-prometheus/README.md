@@ -1,5 +1,5 @@
 ---
-description: "Read-only Prometheus instant and range queries for deployments configuring the DSH AIOps metrics provider."
+description: "Read-only bounded Prometheus queries, alert-rule lookup, target health, and series metadata discovery for DSH AIOps."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package lets DSH read Prometheus metrics through instant and range PromQL queries. Choose it for a trusted Prometheus HTTP endpoint whose response must be bounded and cancellable. It supplies `ctx.prometheus`; the model-facing tool names and rendering belong to `dsh-tool-aiops-observe`. The provider performs no writes and follows no redirects.
+This package lets DSH read Prometheus metrics, alerting rules, target health, and bounded series metadata. Choose it for a trusted Prometheus HTTP endpoint whose response must be bounded and cancellable. It supplies `ctx.prometheus`; the model-facing tool names and rendering belong to `dsh-tool-aiops-observe`. The provider performs no writes and follows no redirects.
 
 ## Table of Contents
 
@@ -40,6 +40,11 @@ Mount one provider row, then let a provider-neutral Consumer call `ctx.prometheu
 | `baseUrl` | required | Trusted Prometheus HTTP(S) endpoint and optional path prefix |
 | `timeoutMs` | `30000` | Per-request deadline |
 | `maxResponseBytes` | `2000000` | Complete response-body byte cap |
+| `defaultDiscoveryLimit` | `20` | Default rule, target, or metadata result count |
+| `maxDiscoveryLimit` | `100` | Hard caller-visible result-count cap |
+| `maxMatcherCount` | `20` | Maximum exact label or series-selector filters per request |
+| `maxInputChars` | `2000` | Maximum length of one discovery input value |
+| `maxDiscoveryWindowSeconds` | `86400` | Maximum absolute label/series discovery window |
 
 The table above is the exhaustive list of accepted fields.
 
@@ -51,7 +56,7 @@ The table above is the exhaustive list of accepted fields.
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-`PrometheusRuntime` defines instant and range query operations; the default `PrometheusHttpRuntime` implements them through `/api/v1/query` and `/api/v1/query_range`. It validates configuration at load, percent-encodes parameters, delegates non-redirecting bounded acquisition to `dsh-aiops-http-read`, and returns only successful Prometheus query data.
+`PrometheusRuntime` defines instant/range queries plus alert-rule, scrape-target, and label/series discovery. The default `PrometheusHttpRuntime` uses only Prometheus GET APIs, validates configuration and request bounds, percent-encodes parameters, delegates non-redirecting bounded acquisition to `dsh-aiops-http-read`, and returns canonical result-count-limited data. Rule lookup excludes active-alert expansion. Target URLs are stripped of credentials, query, and fragment. A supplied `generatorURL` is accepted only for the configured same-origin graph endpoint, parsed locally for PromQL, and never fetched.
 
 | File | Role |
 |---|---|
@@ -94,4 +99,4 @@ No direct invalidation; the named Consumer owns tool schemas and result messages
 <a id="known-limitations-and-deferred-work"></a>
 
 - **Authentication is not implemented** — the first version targets trusted internal endpoints; bearer-token and mTLS providers require a separate credential-aware design.
-- **No Prometheus alert or metadata APIs** — only instant and range PromQL queries are available; Alertmanager reads use the separate AIOps Provider.
+- **No arbitrary or global discovery** — metadata calls require concrete selectors and a bounded absolute time window; target calls require exact labels or a scrape pool.

@@ -1,5 +1,5 @@
 ---
-description: "供部署配置 DSH AIOps 指标 Provider 的只读 Prometheus 即时与范围查询。"
+description: "面向 DSH AIOps 的只读有界 Prometheus 查询、告警规则、Target 健康与时序元数据发现。"
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包让 DSH 通过即时与范围 PromQL 查询读取 Prometheus 指标。它适用于可信的 Prometheus HTTP 端点，并对响应实施大小限制与取消。它提供 `ctx.prometheus`；面向模型的工具名与渲染由 `dsh-tool-aiops-observe` 负责。该 Provider 不执行写入，也不跟随重定向。
+本包让 DSH 读取 Prometheus 指标、告警规则、Target 健康与有界时序元数据。它适用于可信的 Prometheus HTTP 端点，并对响应实施大小限制与取消。它提供 `ctx.prometheus`；面向模型的工具名与渲染由 `dsh-tool-aiops-observe` 负责。该 Provider 不执行写入，也不跟随重定向。
 
 ## 目录
 
@@ -40,6 +40,11 @@ kind: "package-reference"
 | `baseUrl` | 必填 | 可信的 Prometheus HTTP(S) 端点及可选路径前缀 |
 | `timeoutMs` | `30000` | 每次请求的截止时间 |
 | `maxResponseBytes` | `2000000` | 完整响应体字节上限 |
+| `defaultDiscoveryLimit` | `20` | 规则、Target 或元数据的默认结果数 |
+| `maxDiscoveryLimit` | `100` | 调用方可请求的硬结果数上限 |
+| `maxMatcherCount` | `20` | 单次请求的精确 label 或 series selector 上限 |
+| `maxInputChars` | `2000` | 单个发现输入值的最大长度 |
+| `maxDiscoveryWindowSeconds` | `86400` | label/series 发现的最大绝对时间窗 |
 
 上表完整列出了所有可接受字段。
 
@@ -51,7 +56,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部机制——点击展开</summary>
 
-`PrometheusRuntime` 定义即时与范围查询操作；默认的 `PrometheusHttpRuntime` 通过 `/api/v1/query` 与 `/api/v1/query_range` 实现它们。它在加载时校验配置、对参数进行百分号编码、把禁止重定向的有界采集委托给 `dsh-aiops-http-read`，并只返回成功的 Prometheus 查询数据。
+`PrometheusRuntime` 定义即时/范围查询以及告警规则、抓取 Target 和 label/series 发现。默认的 `PrometheusHttpRuntime` 只使用 Prometheus GET API，校验配置和请求边界，对参数进行百分号编码，把禁止重定向的有界采集委托给 `dsh-aiops-http-read`，并返回规范化且限制结果数的数据。规则查询排除活动告警展开；Target URL 会移除凭据、查询与 fragment。传入的 `generatorURL` 只允许指向已配置的同源 Prometheus graph 端点，仅在本地提取 PromQL，绝不发起抓取。
 
 | 文件 | 作用 |
 |---|---|
@@ -94,4 +99,4 @@ kind: "package-reference"
 <a id="known-limitations-and-deferred-work"></a>
 
 - **尚未实现认证**——第一版面向可信内部端点；Bearer token 与 mTLS Provider 需要独立的凭据感知设计。
-- **没有 Prometheus 告警或元数据 API**——当前仅提供即时与范围 PromQL 查询；Alertmanager 读取使用独立的 AIOps Provider。
+- **不允许任意或全局发现**——元数据调用必须包含具体 selector 和有界绝对时间窗；Target 调用必须包含精确 label 或 scrape pool。

@@ -32,6 +32,7 @@
     "@deepseek-ai/dsh-aiops-incident": "workspace:^",
     "@deepseek-ai/dsh-aiops-incident-router": "workspace:^",
     "@deepseek-ai/dsh-aiops-kubernetes": "workspace:^",
+    "@deepseek-ai/dsh-aiops-observability": "workspace:^",
     "@deepseek-ai/dsh-aiops-portal": "workspace:^",
     "@deepseek-ai/dsh-aiops-prometheus": "workspace:^",
     "@deepseek-ai/dsh-aiops-skill-k8s-diag": "workspace:^",

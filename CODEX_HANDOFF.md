@@ -8,9 +8,9 @@ This document is the continuation entry point for a new Codex session. Read it t
 
 - Repository: `git@github.com:jarvan1/dsh-aiops.git`
 - Branch: `main`
-- Current base commit: `e1fd2aa` (`feat: use native Kubernetes client`)
+- Current base commit: `8ee74bf` (`feat: generalize alert diagnosis workflow`)
 - The working tree contains important uncommitted work. Do not reset, checkout, clean, or overwrite it.
-- Before continuing on another machine, commit and push these changes or copy the complete working tree. A fresh clone of `main` at `e1fd2aa` does not contain the work described below.
+- Before continuing on another machine, commit and push these changes or copy the complete working tree. A fresh clone of `main` at `8ee74bf` does not contain the work described below.
 - Never commit a real `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`, kubeconfig, bearer token, or other credential.
 
 ## Product objective
@@ -40,10 +40,15 @@ Alertmanager webhook
 - **Stage F:** persistent DSH Web AIOps entry, incident overview/detail, feedback and route-audit display, live datasource settings, connection tests, and responsive UI.
 - **Stage F.1:** native kubeconfig client without requiring local `kubectl`; Portal save is gated by API identity and required Pod/Event/log RBAC checks.
 - **Stage F.2:** general alert routing and general `aiops-diag` workflow.
+- **Stage F.3.1:** bounded Prometheus rule, target, label, and series discovery for general alerts.
+- **Stage F.3.2:** product liveness/readiness endpoints and low-cardinality Prometheus telemetry.
+- **Stage F.3.3:** guarded repeatable real Alertmanager/k3s receiver and lifecycle matrix.
+- **Stage F.3.4:** versioned live Portal routing-policy management with dry-run and durable audit.
+- **Stage F.3.5:** no-secret Portal boundary, cross-site POST protection, TLS/rotation/migration guidance, and isolated release verification.
 
 ## Current uncommitted implementation
 
-Preserve all current modifications. They contain three related batches:
+Preserve all current modifications. They contain seven related batches:
 
 ### 1. Follow the DSH output language
 
@@ -86,9 +91,42 @@ Profiles using the former `alertnameAllowlist` field must migrate to this shape.
 ### 3. Portal and real Webhook support
 
 - Prometheus, Alertmanager, and Kubernetes settings have connection tests and can only be saved after successful tests.
-- The Portal exposes the configured webhook URL and whether the credential exists; current work also supports an explicit reveal action backed by DSH credentials.
+- The Portal exposes the configured webhook URL and whether the credential exists. It has no reveal or credential-write endpoint and never returns the bearer value to the browser.
 - `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` may be stored under `refs` in `<DSH_HOME>/.credentials.yaml`; the Cordis patch contains only the credential reference name.
-- [`deploy/alertmanager/k3s-webhook-e2e.yaml`](deploy/alertmanager/k3s-webhook-e2e.yaml) is a real Prometheus Operator/Alertmanager test fixture. It deliberately creates a crashing Pod. Replace its host address for the target environment and create the referenced Secret separately.
+- Connection-test and routing-policy dry-run POSTs reject cross-site browser requests. Keep all Web routes behind the authenticated DSH Host boundary.
+
+### 4. Prometheus discovery
+
+- `PrometheusRuntime` now has bounded rule, target-health, and label/series discovery methods.
+- The model tools are `prometheus_rules`, `prometheus_targets`, and `prometheus_discovery`; the complete observation set now has ten tools.
+- Rule lookup recovers exact PromQL by alert name, compares supplied identifying labels, and excludes active-alert expansion.
+- Target lookup requires exact labels or a scrape pool, returns scrape health/error evidence, and strips credentials/query/fragment from observed URLs.
+- Metadata discovery requires concrete selectors and an absolute time window, and enforces Provider-owned matcher, input, window, response-byte, and result-count limits.
+- A `generatorURL` is accepted only for the configured same-origin Prometheus graph path. Its expression is parsed locally before any Provider request and the URL is never fetched.
+- `aiops-diag` now performs rule/target discovery before metric querying or declaring a non-Kubernetes alert under-specified.
+
+### 5. Product self-observability
+
+- A new `dsh-aiops-observability` Cordis service is loaded before the webhook adapter and router.
+- The main Web server exposes exact `GET|HEAD` endpoints at `/api/aiops/healthz`, `/api/aiops/readyz`, and `/api/aiops/metrics`.
+- Readiness requires both the Alertmanager ingress and incident router to be registered.
+- Prometheus exposition covers bounded webhook outcomes, durable queue depth/oldest age, grouped/deferred/dropped work, active diagnoses, dispatch failures, fixed-bucket diagnostic latency, and model token reservations.
+- Metrics use only fixed outcome labels; alert names, fingerprints, delivery IDs, Session IDs, namespaces, and other unbounded identifiers are excluded.
+
+### 6. Repeatable real Alertmanager/k3s matrix
+
+- [`scripts/aiops-e2e.mjs`](scripts/aiops-e2e.mjs) owns guarded setup, direct receiver exercise, Portal verification, restart seeding/verification, and exact-namespace cleanup.
+- The fixture creates a PrometheusRule, AlertmanagerConfig, stdin-only Secret, run marker, and one intentionally crashing Pod. Synthetic alerts carry the namespace label required by Prometheus Operator's namespace-scoped AlertmanagerConfig route.
+- The scenario contract covers CrashLoop, `TargetDown`, arbitrary alertname, missing/vendor severity, firing/resolved/reopened, exact retry, burst pressure, and restart recovery.
+- A default-ignored `Watchdog` rule must produce a new filtered route-audit row, proving the real Prometheus → Alertmanager → authenticated receiver path without a model turn.
+- The static YAML is only a readable non-routable example; the executable runner is documented in [`deploy/alertmanager/README.md`](deploy/alertmanager/README.md).
+
+### 7. Live routing policy and release hardening
+
+- `aiops-routing` version 1 owns noise exclusions, severity mapping/default, model budgets, and storm controls. Router validation enforces cross-field concurrency and token constraints.
+- Portal edits require a successful side-effect-free labels dry-run and one revision-fenced atomic save. Commits apply live and are recorded with before/after hashes and changed fields in `routing_policy_audit`.
+- The deprecated `alertnameAllowlist` field is accepted only for startup migration; it is ignored, emits a warning when non-empty, and safe general-routing defaults are used.
+- [`docs/deployment.md`](docs/deployment.md) and its Chinese version cover TLS, Host authorization, reverse-proxy headers, credential rotation, migration, backups, retention, install/upgrade, and version support.
 
 ## Current verification baseline
 
@@ -97,8 +135,8 @@ The following checks passed with the current files on 2026-09-08:
 ```text
 pnpm run build
 pnpm exec vitest run
-  Test Files: 21 passed, 1 skipped
-  Tests:      139 passed, 1 skipped
+  Test Files: 23 passed, 1 skipped
+  Tests:      155 passed, 1 skipped
 pnpm run build:github
 node scripts/check-links.mjs
 git diff --check
@@ -106,55 +144,13 @@ git diff --check
 
 The skipped test is an opt-in real-cluster test. Run real-cluster tests only against an explicitly designated test cluster.
 
-## Next active stage: F.3 — generic diagnosis hardening
+The opt-in native Kubernetes test was also run against the local k3s cluster on 2026-09-08 and passed against the runner-created CrashLoopBackOff Pod. Prometheus loaded all runner rules, Alertmanager loaded the namespace-scoped AlertmanagerConfig, and an authenticated real receiver delivery produced a new filtered `Watchdog` route-audit row. The temporary `aiops-e2e-release-test` namespace was deleted afterward.
 
-RAG remains deferred. The next stage should make general alerts diagnosable without relying on Kubernetes-specific context.
+An isolated DSH Web profile was installed from the current working tree and passed config dump, real startup, liveness/readiness/metrics, Portal v2, same-origin routing dry-run, cross-site rejection, credential status without plaintext, credential rotation with old-value `401`, restart, and uninstall checks on Node 24.20 and pnpm 11.7. Real startup exposed and fixed two integration-only issues: clean-install resolution of the deprecated array and the router's missing static `settings` injection.
 
-### F.3.1 Prometheus discovery
+## Next active stage: Stage G — evaluated RAG pilot (deferred)
 
-Add bounded, read-only Provider methods and model tools for:
-
-- rule and alert-expression lookup by alert name and labels;
-- target health and scrape-error lookup;
-- label/series discovery with strict result limits;
-- safe parsing of Alertmanager `generatorURL` without accepting arbitrary model-supplied URLs.
-
-Suggested tool names are `prometheus_rules`, `prometheus_targets`, and a tightly bounded label/series discovery tool. Update `aiops-diag` so it uses these before declaring a non-Kubernetes alert under-specified. Do not invent PromQL or metric names.
-
-Acceptance criteria:
-
-- A custom non-Kubernetes alert can recover its rule expression and target identity.
-- Every request has timeouts, response-size limits, result-count limits, cancellation, canonical output, and unit tests.
-- No write API, arbitrary URL fetch, or unrestricted discovery is introduced.
-
-### F.3.2 Product self-observability
-
-Expose health/readiness and Prometheus metrics for webhook authentication failures, deliveries, queue depth/age, grouped/deferred/dropped work, active diagnoses, dispatch failures, diagnostic latency, and model token reservations. Avoid alert labels that create unbounded metric cardinality.
-
-### F.3.3 Repeatable real E2E matrix
-
-Turn the manual k3s fixture into documented repeatable tests for:
-
-- Kubernetes CrashLoop alert;
-- Prometheus `TargetDown`;
-- arbitrary non-Kubernetes alert name;
-- missing and vendor-specific severity;
-- firing, resolved, and reopened rounds;
-- duplicate delivery and Alertmanager retry;
-- burst grouping, queue pressure, and restart recovery.
-
-Tests must verify the real Alertmanager receiver, DSH route audit, Session creation, selected evidence branch, and persisted report. Never commit the bearer secret.
-
-### F.3.4 Portal routing-policy management
-
-Add a versioned, validated settings surface for ignored alert names, severity mapping/default, cooldown, concurrency, queue, and token budgets. Include dry-run evaluation against a pasted or historical normalized alert before save. Preserve safe static defaults and audit configuration changes.
-
-### F.3.5 Security and release hardening
-
-- Review the Portal secret-reveal endpoint before release. It currently returns plaintext only after an explicit request, but still needs a clear Host authorization boundary, CSRF posture, audit event, and rotation story. Prefer keeping credentials server-side unless copying into Alertmanager is an explicit administrator workflow.
-- Add TLS/reverse-proxy deployment guidance.
-- Verify clean install, upgrade from the old allowlist schema, uninstall, GitHub source install, and supported DSH/Node version matrix.
-- Commit and push only after the full verification baseline passes again.
+F.3.3–F.3.5 are complete. Do not add retrieval until there is an owned runbook/postmortem corpus, access and freshness policy, citations, and a fixed evaluation set. The next implementation should begin by defining that corpus and evaluation harness, not by wiring an unmeasured vector store into diagnosis.
 
 ## Later stages
 

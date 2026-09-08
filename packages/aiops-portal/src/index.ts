@@ -10,9 +10,11 @@ import { testEndpointConnection } from './connectivity.ts'
 import {
   PORTAL_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
+  PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH,
   PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
   type ConnectionTestRequest,
   type ConnectionTestResult,
+  type RoutingPolicyDryRunRequest,
 } from './types.ts'
 import { readPortalSnapshot, type PortalLimits } from './snapshot.ts'
 
@@ -56,11 +58,22 @@ function json(res: import('node:http').ServerResponse, status: number, value: un
   res.end(head ? undefined : body)
 }
 
-async function readJsonBody(req: import('node:http').IncomingMessage): Promise<unknown> {
+/** Reject cross-site browser POSTs before any connection probe or policy evaluation. */
+function trustedPost(req: import('node:http').IncomingMessage): boolean {
+  const site = req.headers['sec-fetch-site']
+  if (site === 'cross-site') return false
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  const host = req.headers['x-forwarded-host'] ?? req.headers.host
+  if (typeof host !== 'string') return false
+  try { return new URL(origin).host === host.split(',', 1)[0]?.trim() } catch { return false }
+}
+
+async function readJsonBody(req: import('node:http').IncomingMessage, maxBytes = 4096): Promise<unknown> {
   const contentType = req.headers['content-type']?.split(';', 1)[0]?.trim().toLowerCase()
   if (contentType !== 'application/json') throw new Error('unsupported_media_type')
   const declared = req.headers['content-length']
-  if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) > 4096)) {
+  if (declared !== undefined && (!/^\d+$/.test(declared) || Number(declared) > maxBytes)) {
     throw new Error('request_too_large')
   }
   const chunks: Buffer[] = []
@@ -68,7 +81,7 @@ async function readJsonBody(req: import('node:http').IncomingMessage): Promise<u
   for await (const raw of req) {
     const chunk = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as string)
     bytes += chunk.byteLength
-    if (bytes > 4096) {
+    if (bytes > maxBytes) {
       req.resume()
       throw new Error('request_too_large')
     }
@@ -95,10 +108,15 @@ function connectionRequest(value: unknown): ConnectionTestRequest | undefined {
   return { target, ...(kubeconfig === undefined ? {} : { kubeconfig }), ...(context === undefined ? {} : { context }) }
 }
 
-function revealSecretRequest(value: unknown): boolean | undefined {
+function routingPolicyDryRunRequest(value: unknown): RoutingPolicyDryRunRequest | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-  const revealSecret = Reflect.get(value, 'revealSecret')
-  return typeof revealSecret === 'boolean' ? revealSecret : undefined
+  const labels = Reflect.get(value, 'labels')
+  const settings = Reflect.get(value, 'settings')
+  if (typeof labels !== 'object' || labels === null || Array.isArray(labels)
+    || typeof settings !== 'object' || settings === null || Array.isArray(settings)) return undefined
+  const entries = Object.entries(labels)
+  if (entries.length > 100 || entries.some(([key, item]) => key === '' || key.length > 256 || typeof item !== 'string' || item.length > 4096)) return undefined
+  return { labels: Object.fromEntries(entries) as Record<string, string>, settings: settings as RoutingPolicyDryRunRequest['settings'] }
 }
 
 export async function testPortalConnection(ctx: Context, request: ConnectionTestRequest, signal: AbortSignal): Promise<ConnectionTestResult> {
@@ -168,6 +186,10 @@ export function apply(ctx: Context, config: Config): void {
           json(res, 405, { error: 'method_not_allowed' }, false)
           return
         }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
         const controller = new AbortController()
         const abort = () => controller.abort()
         req.once('aborted', abort)
@@ -191,31 +213,52 @@ export function apply(ctx: Context, config: Config): void {
       kind: 'exact',
       path: PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
       async handler(req, res) {
+        const method = req.method ?? 'GET'
+        if (method !== 'GET' && method !== 'HEAD') {
+          res.setHeader('allow', 'GET, HEAD')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        try {
+          const credential = await webCtx.credentials.resolve(webhookSecretRef)
+          const secret = credential?.value
+          json(res, 200, {
+            version: 2,
+            url: webhookUrl,
+            secretConfigured: secret !== undefined && secret !== '',
+          }, method === 'HEAD')
+        } catch (error: unknown) {
+          webCtx.logger.warn(error)
+          json(res, 503, { error: 'credential_status_unavailable' }, method === 'HEAD')
+        }
+      },
+    }), `aiops-portal: ${PORTAL_WEBHOOK_CONFIGURATION_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH,
+      async handler(req, res) {
         if (req.method !== 'POST') {
           res.setHeader('allow', 'POST')
           json(res, 405, { error: 'method_not_allowed' }, false)
           return
         }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
         try {
-          const revealSecret = revealSecretRequest(await readJsonBody(req))
-          if (revealSecret === undefined) {
+          const value = routingPolicyDryRunRequest(await readJsonBody(req, 65_536))
+          if (value === undefined) {
             json(res, 400, { error: 'invalid_request' }, false)
             return
           }
-          const credential = await webCtx.credentials.resolve(webhookSecretRef)
-          const secret = credential?.value
-          json(res, 200, {
-            version: 1,
-            url: webhookUrl,
-            secretConfigured: secret !== undefined && secret !== '',
-            ...(revealSecret && secret !== undefined && secret !== '' ? { secret } : {}),
-          }, false)
+          json(res, 200, webCtx.aiopsIncidentRouter.dryRun(value.labels, value.settings), false)
         } catch (error: unknown) {
           const code = error instanceof Error ? error.message : 'invalid_request'
           const status = code === 'unsupported_media_type' ? 415 : code === 'request_too_large' ? 413 : 400
           json(res, status, { error: code }, false)
         }
       },
-    }), `aiops-portal: ${PORTAL_WEBHOOK_CONFIGURATION_API_PATH}`)
+    }), `aiops-portal: ${PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH}`)
   })
 }

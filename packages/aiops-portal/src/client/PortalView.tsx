@@ -4,13 +4,17 @@ import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   PORTAL_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
+  PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH,
   PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
   type ConnectionTestRequest,
   type ConnectionTestResult,
   type PortalIncident,
   type PortalSnapshot,
+  type RoutingPolicyDryRunRequest,
+  type RoutingPolicyDryRunResult,
 } from '../types.ts'
 import { ConnectionSettings } from './ConnectionSettings.tsx'
+import { RoutingPolicySettings } from './RoutingPolicySettings.tsx'
 import type { PortalViewInjected } from './contracts.ts'
 import { filterPortalIncidents, type ReviewFilter, type SeverityFilter, type StatusFilter } from './model.ts'
 import css from './portal.module.css'
@@ -59,7 +63,7 @@ function IncidentDetail({ item, t }: { item: PortalIncident; t: Props['t'] }) {
   </article>
 }
 
-export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, onClose, t }: DashboardProps) {
+export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, onClose, t }: DashboardProps) {
   const [snapshot, setSnapshot] = useState<PortalSnapshot | null>(null)
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -112,7 +116,7 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
       <button className={section === 'audit' ? css.activeTab : ''} onClick={() => setSection('audit')}>{t('audit')} <span>{snapshot?.audit.length ?? 0}</span></button>
     </nav>
     {section === 'settings'
-      ? <ConnectionSettings loadWebhookConfiguration={loadWebhookConfiguration} testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} kubernetesSettings={kubernetesSettings} t={t}/>
+      ? <><ConnectionSettings loadWebhookConfiguration={loadWebhookConfiguration} testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} kubernetesSettings={kubernetesSettings} t={t}/><RoutingPolicySettings routingSettings={routingSettings} dryRunRoutingPolicy={dryRunRoutingPolicy} audit={snapshot?.routingPolicyAudit ?? []} t={t}/></>
       : loading && snapshot === null
         ? <div className={css.center}><span className={css.spinner}/>{t('loading')}</div>
         : error && snapshot === null
@@ -151,14 +155,16 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
   </main>
 }
 
-export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnection, prometheusSettings, alertmanagerSettings, kubernetesSettings, t }: Props) {
+export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, t }: Props) {
   return <PortalDashboard
     loadSnapshot={loadSnapshot}
     loadWebhookConfiguration={loadWebhookConfiguration}
     testConnection={testConnection}
+    dryRunRoutingPolicy={dryRunRoutingPolicy}
     prometheusSettings={prometheusSettings}
     alertmanagerSettings={alertmanagerSettings}
     kubernetesSettings={kubernetesSettings}
+    routingSettings={routingSettings}
     t={t}
   />
 }
@@ -185,16 +191,29 @@ export async function fetchPortalConnectionTest(
 }
 
 export async function fetchWebhookConfiguration(
-  revealSecret: boolean,
   signal?: AbortSignal,
 ): Promise<import('../types.ts').WebhookConfiguration> {
   const response = await fetch(PORTAL_WEBHOOK_CONFIGURATION_API_PATH, {
-    method: 'POST',
-    headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({ revealSecret }),
+    method: 'GET',
+    headers: { accept: 'application/json' },
     cache: 'no-store',
     ...(signal === undefined ? {} : { signal }),
   })
   if (!response.ok) throw new Error(`AIOps webhook configuration HTTP ${response.status}`)
   return await response.json() as import('../types.ts').WebhookConfiguration
+}
+
+export async function fetchRoutingPolicyDryRun(
+  request: RoutingPolicyDryRunRequest,
+  signal?: AbortSignal,
+): Promise<RoutingPolicyDryRunResult> {
+  const response = await fetch(PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(request),
+    cache: 'no-store',
+    ...(signal === undefined ? {} : { signal }),
+  })
+  if (!response.ok) throw new Error(`AIOps routing policy dry-run HTTP ${response.status}`)
+  return await response.json() as RoutingPolicyDryRunResult
 }

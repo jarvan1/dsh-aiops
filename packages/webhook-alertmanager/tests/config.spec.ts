@@ -16,6 +16,7 @@ function harness(): { ctx: Context; register: ReturnType<typeof vi.fn>; remove: 
   ctx.provide('webServer', { register } as never)
   ctx.provide('webhookRuntime', {} as never)
   ctx.provide('credentials', {} as never)
+  ctx.provide('aiopsTelemetry', { markComponent: vi.fn() } as never)
   return { ctx, register, remove }
 }
 

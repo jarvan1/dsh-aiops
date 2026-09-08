@@ -3,11 +3,12 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { RoutingSettings } from '@deepseek-ai/dsh-aiops-incident-router'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { en, NS, zh } from './locales.ts'
 import type { EndpointSettings, KubernetesSettings, PortalViewInjected } from './contracts.ts'
 import { AIOpsSidebarAction } from './AIOpsSidebarAction.tsx'
-import { fetchPortalSnapshot, fetchPortalConnectionTest, fetchWebhookConfiguration, PortalView } from './PortalView.tsx'
+import { fetchPortalSnapshot, fetchPortalConnectionTest, fetchRoutingPolicyDryRun, fetchWebhookConfiguration, PortalView } from './PortalView.tsx'
 
 export const inject = ['slots', 'locale', 'settingsScope']
 
@@ -26,6 +27,11 @@ function kubernetesSettings(value: unknown): KubernetesSettings | undefined {
   return { kubeconfig: kubeconfig ?? '', context: context ?? '' }
 }
 
+function routingSettings(value: unknown): RoutingSettings | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value) || Reflect.get(value, 'version') !== 1) return undefined
+  return value as RoutingSettings
+}
+
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'aiops-portal: dictionaries')
   const t = ctx.locale.bind(NS)
@@ -41,13 +47,19 @@ export function apply(ctx: Context): void {
     namespace: 'aiops-kubernetes',
     decode: kubernetesSettings,
   })
+  const routingSettingsScope: SettingsScope<RoutingSettings> = ctx.settingsScope.bind({
+    namespace: 'aiops-routing',
+    decode: routingSettings,
+  })
   const injectPortal = (): PortalViewInjected => ({
     loadSnapshot: fetchPortalSnapshot,
     loadWebhookConfiguration: fetchWebhookConfiguration,
     testConnection: fetchPortalConnectionTest,
+    dryRunRoutingPolicy: fetchRoutingPolicyDryRun,
     prometheusSettings,
     alertmanagerSettings,
     kubernetesSettings: kubernetesSettingsScope,
+    routingSettings: routingSettingsScope,
   })
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',

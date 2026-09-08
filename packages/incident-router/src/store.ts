@@ -6,6 +6,7 @@ import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { SessionId, type SessionId as SessionIdType } from '@deepseek-ai/dsh-session'
 import type { AlertmanagerAlert } from '@deepseek-ai/dsh-webhook-alertmanager'
+import type { RoutingSettings } from './index.ts'
 
 /** Routing result for one accepted alert. */
 export type AcceptedRouteDecision = 'created' | 'appended' | 'resolved' | 'reopened' | 'repeated-resolved'
@@ -57,6 +58,18 @@ export interface RouteAuditRecord {
   readonly reservedTokens: number
   readonly recordedAt: number
   readonly attempt: number
+}
+
+/** Durable, secret-free record of one committed live routing-policy change. */
+export interface RoutingPolicyAuditRecord {
+  readonly id: number
+  readonly version: 1
+  readonly previousHash: string
+  readonly nextHash: string
+  readonly changedFields: readonly string[]
+  readonly previous: RoutingSettings
+  readonly next: RoutingSettings
+  readonly recordedAt: number
 }
 
 /** Durable result returned for an accepted alert delivery. */
@@ -125,7 +138,7 @@ export class IncidentRouteStore {
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec('PRAGMA journal_mode = WAL')
     const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
-    if (version.user_version < 0 || version.user_version > 2) {
+    if (version.user_version < 0 || version.user_version > 3) {
       this.db.close()
       throw new Error(`incident router schema version ${String(version.user_version)} is unsupported`)
     }
@@ -220,7 +233,17 @@ export class IncidentRouteStore {
         dispatched_at INTEGER NOT NULL,
         PRIMARY KEY (source, fingerprint)
       ) STRICT;
-      PRAGMA user_version = 2;
+      CREATE TABLE IF NOT EXISTS routing_policy_audit (
+        audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version INTEGER NOT NULL,
+        previous_hash TEXT NOT NULL,
+        next_hash TEXT NOT NULL,
+        changed_fields_json TEXT NOT NULL,
+        previous_json TEXT NOT NULL,
+        next_json TEXT NOT NULL,
+        recorded_at INTEGER NOT NULL
+      ) STRICT;
+      PRAGMA user_version = 3;
     `)
     this.recoverProcessingWork(Date.now())
   }
@@ -416,6 +439,18 @@ export class IncidentRouteStore {
     return row.count
   }
 
+  /** Current durable queue depth and oldest item age for low-cardinality telemetry. */
+  queueStats(now: number): { queueDepth: number; queueOldestAgeSeconds: number } {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count, MIN(received_at) AS oldest
+      FROM route_work WHERE state IN ('queued', 'processing')
+    `).get() as { count: number; oldest: number | null }
+    return {
+      queueDepth: row.count,
+      queueOldestAgeSeconds: row.oldest === null ? 0 : Math.max(0, (now - row.oldest) / 1_000),
+    }
+  }
+
   /** Whether a fingerprint already has queued or in-flight work to coalesce with. */
   hasPendingFingerprint(source: string, fingerprint: string): boolean {
     return this.db.prepare(`
@@ -454,7 +489,7 @@ export class IncidentRouteStore {
     'global-concurrency' | 'severity-concurrency' | 'global-token-budget' | 'severity-token-budget'>,
     now: number,
     reservedTokens: number,
-  ): void {
+  ): number {
     const rows = this.db.prepare(`
       SELECT * FROM route_work
       WHERE source = ? AND fingerprint = ? AND state = 'queued'
@@ -465,8 +500,10 @@ export class IncidentRouteStore {
       WHERE source = ? AND fingerprint = ? AND state = 'queued'
     `).run(reason, now, source, fingerprint)
     const depth = this.queueDepth()
+    let changed = 0
     for (const row of rows) {
       if (row.reason === reason) continue
+      changed += 1
       this.appendAudit({
         ...this.decodeWork(row, row.attempts),
         outcome: 'deferred',
@@ -477,6 +514,7 @@ export class IncidentRouteStore {
         attempt: row.attempts,
       })
     }
+    return changed
   }
 
   /** Atomically claim the leading same-status alerts for one fingerprint as one model turn. */
@@ -648,6 +686,48 @@ export class IncidentRouteStore {
       reservedTokens: row.reserved_tokens,
       recordedAt: row.recorded_at,
       attempt: row.attempt,
+    }))
+  }
+
+  /** Persist one settings commit without embedding operator identity or secrets. */
+  recordPolicyChange(previous: RoutingSettings, next: RoutingSettings, recordedAt: number): void {
+    const previousJson = JSON.stringify(previous)
+    const nextJson = JSON.stringify(next)
+    if (previousJson === nextJson) return
+    const fields = ['routingPolicy', 'severityMap', 'modelBudgets', 'stormControl']
+      .filter(field => JSON.stringify(Reflect.get(previous, field)) !== JSON.stringify(Reflect.get(next, field)))
+    const hash = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`
+    this.db.prepare(`
+      INSERT INTO routing_policy_audit
+        (version, previous_hash, next_hash, changed_fields_json, previous_json, next_json, recorded_at)
+      VALUES (1, ?, ?, ?, ?, ?, ?)
+    `).run(hash(previousJson), hash(nextJson), JSON.stringify(fields), previousJson, nextJson, recordedAt)
+  }
+
+  /** Read bounded newest-first routing-policy commits for the Portal. */
+  listPolicyAudit(input: { readonly limit: number }): RoutingPolicyAuditRecord[] {
+    const limit = Math.max(1, Math.min(250, Math.trunc(input.limit)))
+    const rows = this.db.prepare(`
+      SELECT * FROM routing_policy_audit ORDER BY recorded_at DESC, audit_id DESC LIMIT ?
+    `).all(limit) as unknown as Array<{
+      audit_id: number
+      version: number
+      previous_hash: string
+      next_hash: string
+      changed_fields_json: string
+      previous_json: string
+      next_json: string
+      recorded_at: number
+    }>
+    return rows.map(row => ({
+      id: row.audit_id,
+      version: 1,
+      previousHash: row.previous_hash,
+      nextHash: row.next_hash,
+      changedFields: JSON.parse(row.changed_fields_json) as string[],
+      previous: JSON.parse(row.previous_json) as RoutingSettings,
+      next: JSON.parse(row.next_json) as RoutingSettings,
+      recordedAt: row.recorded_at,
     }))
   }
 

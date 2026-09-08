@@ -10,6 +10,7 @@ import type {} from '@deepseek-ai/dsh-aiops-prometheus'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolExecution, ValueSchemaSpec } from '@deepseek-ai/dsh-tools'
+import { snapshotJsonValue } from '@deepseek-ai/dsh-util-values'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 
 /** Cordis plugin name used by Loader diagnostics. */
@@ -24,6 +25,12 @@ function renderJson(_args: unknown, value: JsonValue): ContentBlock[] {
 
 function renderText(_args: unknown, value: string): ContentBlock[] {
   return [{ type: 'text', text: value }]
+}
+
+async function jsonValue(promise: Promise<unknown>): Promise<JsonValue> {
+  const value = snapshotJsonValue(await promise)
+  if (value === undefined) throw new Error('AIOps Provider returned a non-JSON result.')
+  return value as JsonValue
 }
 
 const prometheusOutputSchema = {
@@ -92,6 +99,92 @@ export function apply(ctx: Context): void {
     output: { schema: prometheusOutputSchema, render: renderJson },
     execute: (args, exec) => ctx.prometheus.queryRange(args, exec.signal),
     presentCall: args => ({ card: 'generic', title: 'Query Prometheus range', kind: 'search', rawInput: args }),
+  }))
+
+  const exactLabelMatcherSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      name: { type: 'string', required: true, description: 'Exact Prometheus label name.' },
+      value: { type: 'string', required: true, description: 'Exact Prometheus label value.' },
+    },
+  } as const
+
+  ctx.tools.register(defineTool({
+    name: 'prometheus_rules',
+    description: 'Look up bounded read-only Prometheus alerting-rule definitions by exact alert name and optional alert labels. Returns the configured PromQL; never invent an expression. generator_url is parsed locally only when it identifies the configured Prometheus graph endpoint and is never fetched.',
+    parameters: {
+      alert_name: { type: 'string', required: true, description: 'Exact alertname from the routed alert.' },
+      label_matchers: {
+        type: 'array',
+        items: exactLabelMatcherSchema,
+        description: 'Optional exact alert labels used to rank and compare candidate rule definitions.',
+      },
+      generator_url: {
+        type: 'string',
+        description: 'Optional generatorURL copied exactly from the routed alert; never provide another URL.',
+      },
+      limit: { type: 'integer', description: 'Maximum results; omission uses the Provider default and excess is capped.' },
+    },
+    output: { schema: { type: 'json' }, render: renderJson },
+    execute: (args, exec) => jsonValue(ctx.prometheus.rules({
+      alertName: args.alert_name,
+      ...(args.label_matchers === undefined ? {} : { labelMatchers: args.label_matchers }),
+      ...(args.generator_url === undefined ? {} : { generatorUrl: args.generator_url }),
+      ...(args.limit === undefined ? {} : { limit: args.limit }),
+    }, exec.signal)),
+    presentCall: args => ({ card: 'generic', title: 'Find Prometheus alert rules', kind: 'search', rawInput: args }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'prometheus_targets',
+    description: 'Look up bounded read-only Prometheus scrape-target health and last scrape errors. At least one exact label matcher or scrape pool is required; broad target enumeration is rejected.',
+    parameters: {
+      label_matchers: {
+        type: 'array',
+        items: exactLabelMatcherSchema,
+        description: 'Exact target labels, normally copied from alert job and instance labels.',
+      },
+      scrape_pool: { type: 'string', description: 'Optional exact Prometheus scrape-pool name.' },
+      state: { type: 'string', enum: ['active', 'dropped', 'any'], description: 'Target state; defaults to any.' },
+      limit: { type: 'integer', description: 'Maximum results; omission uses the Provider default and excess is capped.' },
+    },
+    output: { schema: { type: 'json' }, render: renderJson },
+    execute: (args, exec) => jsonValue(ctx.prometheus.targets({
+      ...(args.label_matchers === undefined ? {} : { labelMatchers: args.label_matchers }),
+      ...(args.scrape_pool === undefined ? {} : { scrapePool: args.scrape_pool }),
+      ...(args.state === undefined ? {} : { state: args.state }),
+      ...(args.limit === undefined ? {} : { limit: args.limit }),
+    }, exec.signal)),
+    presentCall: args => ({ card: 'generic', title: 'Find Prometheus targets', kind: 'search', rawInput: args }),
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'prometheus_discovery',
+    description: 'Discover a strictly bounded set of Prometheus series identities, label names, or label values over an explicit absolute time window. Every request requires concrete selectors; unrestricted metadata enumeration is rejected.',
+    parameters: {
+      kind: { type: 'string', required: true, enum: ['series', 'label_names', 'label_values'], description: 'Metadata kind to discover.' },
+      matchers: {
+        type: 'array',
+        required: true,
+        items: { type: 'string' },
+        description: 'Concrete series selectors. Each must name a metric or contain a non-empty exact label matcher.',
+      },
+      label_name: { type: 'string', description: 'Required for label_values and invalid for other kinds.' },
+      start: { type: 'string', required: true, description: 'Inclusive absolute RFC3339 or Unix start time.' },
+      end: { type: 'string', required: true, description: 'Inclusive absolute RFC3339 or Unix end time.' },
+      limit: { type: 'integer', description: 'Maximum results; omission uses the Provider default and excess is capped.' },
+    },
+    output: { schema: { type: 'json' }, render: renderJson },
+    execute: (args, exec) => jsonValue(ctx.prometheus.discover({
+      kind: args.kind,
+      matchers: args.matchers,
+      ...(args.label_name === undefined ? {} : { labelName: args.label_name }),
+      start: args.start,
+      end: args.end,
+      ...(args.limit === undefined ? {} : { limit: args.limit }),
+    }, exec.signal)),
+    presentCall: args => ({ card: 'generic', title: 'Discover Prometheus metadata', kind: 'search', rawInput: args }),
   }))
 
   ctx.tools.register(defineTool({

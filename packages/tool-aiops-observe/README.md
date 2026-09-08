@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package gives the model seven read-only observation tools: Alertmanager current alerts, Prometheus instant/range queries, and Kubernetes object/list/Event/Pod-log reads. Use it with one Provider for each service to collect factual incident evidence. The tools expose no raw HTTP URL, shell command, arbitrary kubectl arguments, log following, or mutation. Provider limits bound every complete result returned to the model.
+This package gives the model ten read-only observation tools: Alertmanager current alerts; Prometheus instant/range queries, rule lookup, target health, and bounded metadata discovery; and Kubernetes object/list/Event/Pod-log reads. Use it with one Provider for each service to collect factual incident evidence. The tools expose no arbitrary HTTP fetch, shell command, arbitrary kubectl arguments, log following, or mutation. Provider limits bound every complete result returned to the model.
 
 ## Table of Contents
 
@@ -54,7 +54,7 @@ Each tool translates snake-case model arguments to one provider-neutral Service 
 
 | File | Role |
 |---|---|
-| [`src/index.ts`](src/index.ts) | Seven schemas, Service calls, rendering, and pure call presentation |
+| [`src/index.ts`](src/index.ts) | Ten schemas, Service calls, rendering, and pure call presentation |
 | — | No invariant companion is published because this adapter owns no independent state or lifecycle stream |
 
 </details>
@@ -86,11 +86,11 @@ None.
 
 #### What the model sees
 
-The model sees the registered `alertmanager_alerts`, `prometheus_query`, `prometheus_query_range`, `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, and `kubernetes_logs` schemas. Their descriptions identify every operation as read-only and tell the model to use observations as evidence rather than immediate causal proof.
+The model sees the registered `alertmanager_alerts`, `prometheus_query`, `prometheus_query_range`, `prometheus_rules`, `prometheus_targets`, `prometheus_discovery`, `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, and `kubernetes_logs` schemas. Their descriptions identify every operation as read-only and tell the model to use observations as evidence rather than immediate causal proof.
 
 #### Token effect
 
-The seven schemas add a fixed request prefix while this plugin is visible. Each successful call appends Provider-bounded JSON or exact bounded log text; failures append the contained tool error.
+The ten schemas add a fixed request prefix while this plugin is visible. Each successful call appends Provider-bounded JSON or exact bounded log text; failures append the contained tool error.
 
 #### KV Cache effect
 

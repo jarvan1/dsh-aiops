@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a general fingerprint router with durable queue/cooldown/resource budgets, the packaged `aiops-diag` skill, three observation Providers, seven observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; endpoints and the server-side kubeconfig path can be supplied through environment defaults or saved live in the Portal. Kubernetes reads need read-only cluster credentials but do not require kubectl.
+This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a general fingerprint router with durable queue/cooldown/resource budgets, low-cardinality health/readiness/Prometheus telemetry, the packaged `aiops-diag` skill, three observation Providers, ten observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; endpoints and the server-side kubeconfig path can be supplied through environment defaults or saved live in the Portal. Kubernetes reads need read-only cluster credentials but do not require kubectl.
 
 ## Table of Contents
 
@@ -52,7 +52,7 @@ The plugin command reconciles this package and its dependencies into the profile
 
 ### What you get
 
-The layer inserts a generic webhook runtime, deterministic incident router, globally registered `aiops-diag` instructions, an isolated Alertmanager listener, three observation Providers, observation/report/feedback/history tools, and a read-only `AIOps` Web tab. The router accepts all alert names except explicitly configured noise and assigns a default severity when the source value is missing or unknown. `AIOPS_WORKSPACE` selects both the diagnostic Workspace and the Portal's fixed server-side scope. The bundle keeps routing state, queue, and audit in `aiops-router.sqlite` and the disposable history index in `aiops-incidents.sqlite`. Default storm control uses a 60-second fingerprint cooldown, a 100-item/15-minute queue, three attempts, four globally active turns, and severity-specific concurrency/token reservations.
+The layer inserts a generic webhook runtime, deterministic incident router, globally registered `aiops-diag` instructions, an isolated Alertmanager listener, three observation Providers, observation/report/feedback/history tools, product telemetry, and an `AIOps` Web workspace. Incident content remains read-only; versioned routing policy can be dry-run, saved with a revision fence, applied live, and durably audited. The Portal never returns the webhook secret. The main Web server exposes `/api/aiops/healthz`, `/api/aiops/readyz`, and `/api/aiops/metrics`; readiness requires both ingress and router registration, and metrics contain no alert-derived labels. The router accepts all alert names except explicitly configured noise and assigns a default severity when the source value is missing or unknown. `AIOPS_WORKSPACE` selects both the diagnostic Workspace and the Portal's fixed server-side scope. The bundle keeps routing state, queue, and audit in `aiops-router.sqlite` and the disposable history index in `aiops-incidents.sqlite`. Default storm control uses a 60-second fingerprint cooldown, a 100-item/15-minute queue, three attempts, four globally active turns, and severity-specific concurrency/token reservations.
 
 Configure Alertmanager's webhook receiver to send JSON with `Authorization: Bearer <secret>`. An optional `X-DSH-Delivery-ID` enables sender-owned retry identity; otherwise the authenticated body digest is used. The shipped policy accepts arbitrary alert names except its explicit noise exclusions, normalizes known severity labels, falls back to a configured default severity, and applies severity-specific model and storm-control budgets. A later profile patch can replace those policy values.
 
@@ -81,6 +81,8 @@ The patch is a later profile layer: it inserts AIOps row IDs and deliberately re
 
 - [AIOps package map](../README.md) — packages supplied by this layer.
 - [AIOps subsystem](../../docs/aiops.md) — architecture and first-version boundaries.
+- [Production deployment and upgrade](../../docs/deployment.md) — Host/TLS, credential rotation, migration, and release checks.
+- [Repeatable Alertmanager/k3s matrix](../../deploy/alertmanager/README.md) — guarded real receiver workflow.
 - [DSH profile boot](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/boot/app-boot/README.md) — bundle order and user patch semantics.
 
 -----
@@ -107,6 +109,6 @@ Adding or removing the layer changes the visible tool-schema prefix; provider en
 
 - **The layer requires an existing application profile** — it does not include `dsh-base`, an LLM provider, or a task runner.
 - **The listener has no TLS** — keep the default loopback bind behind a TLS reverse proxy, or explicitly protect an all-interface bind with network policy.
-- **Environment values are composition defaults** — the Web Portal can persist and apply endpoint and kubeconfig selections live.
+- **Environment values are composition defaults** — the Web Portal can persist and apply endpoint, kubeconfig, and routing-policy selections live.
 - **Read-only credentials remain deployment-owned** — the Portal checks required Kubernetes RBAC, but cannot prove external Alertmanager/Prometheus ACL policy.
 - **One process owns the index path** — do not point another running Session Query Provider at the same `aiops-incidents.sqlite` file.

@@ -12,7 +12,7 @@
 | --- | --- |
 | DSH | `@deepseek-ai/dsh@0.1.2-rc.1` |
 | Node.js | `^22.19.0` 或 `>=24.0.0` |
-| pnpm | `>=10`（Git prepare 脚本可能需要显式放行） |
+| pnpm | `11.7.0`（需要 `>=10` 的 Git prepare 脚本放行语义） |
 
 直接把 GitHub 仓库安装到 DSH Web profile：
 
@@ -56,6 +56,8 @@ GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可�
 
 在 Web profile 中，左侧栏底部始终显示 `AIOps` 入口，可以从任意页面打开全局 Portal；非空 Session 中仍保留 `AIOps` 会话标签。Portal 固定读取 `AIOPS_WORKSPACE`，不会以当前聊天 Session 的工作区扩大查询范围。Prometheus/Alertmanager URL 以及服务端 kubeconfig 路径/context 会写入 DSH 用户设置并立即生效。三个数据源都必须通过连通性测试，Kubernetes 还会验证最低只读 RBAC 权限。
 
-Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，已完成与后续阶段见 [路线图](docs/roadmap.zh.md)，重要变更见 [Changelog](CHANGELOG.md)，当前工作树状态和新 Codex 接续清单见 [Codex 交接文档](CODEX_HANDOFF.md)。
+同一工作台还可管理版本化路由策略。粘贴的标准化 label 必须先完成 dry-run，才能以 settings revision fence 原子保存完整策略；变更立即生效并持久审计。Webhook 凭据始终留在服务端，Portal 只返回是否已配置。
+
+Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，Host/TLS/轮换边界见[生产部署与升级](docs/deployment.zh.md)，真实集群验证见[可重复 Alertmanager/k3s 矩阵](deploy/alertmanager/README.zh.md)，已完成与后续阶段见[路线图](docs/roadmap.zh.md)，重要变更见 [Changelog](CHANGELOG.md)。
 
 DSH 主仓库继续拥有通用 Session、查询、Workflow、权限与运行时能力。本仓库只拥有 AIOps 领域包和 bundle。

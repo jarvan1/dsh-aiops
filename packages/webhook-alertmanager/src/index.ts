@@ -2,6 +2,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
+import type {} from '@deepseek-ai/dsh-aiops-observability'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import z from '@deepseek-ai/schemastery'
 import { createAlertmanagerWebhookHandler } from './handler.ts'
@@ -12,7 +13,7 @@ export { normalizeAlertmanagerWebhook } from './normalize.ts'
 /** Cordis plugin name. */
 export const name = 'webhook-alertmanager'
 /** Services required to register and operate the exact route. */
-export const inject = ['webServer', 'webhookRuntime', 'credentials']
+export const inject = ['webServer', 'webhookRuntime', 'credentials', 'aiopsTelemetry']
 
 /** Alertmanager ingress configuration. */
 export interface Config {
@@ -62,4 +63,6 @@ export function apply(ctx: Context, config: Config): void {
     }),
   }
   ctx.effect(() => ctx.webServer.register(route), `webhook-alertmanager: ${config.path}`)
+  ctx.aiopsTelemetry.markComponent('webhook', true)
+  ctx.effect(() => () => { ctx.aiopsTelemetry.markComponent('webhook', false) })
 }

@@ -1,9 +1,8 @@
 # End-to-end fixture for kube-prometheus-stack / Prometheus Operator.
 #
-# Before applying:
-#   1. Change the webhook URL to the LAN IP of the host running DSH.
-#   2. Start DSH with AIOPS_WEBHOOK_HOST=0.0.0.0.
-#   3. Create dsh-aiops-webhook-auth in this namespace; do not commit its token.
+# This file is an illustrative single-scenario manifest. Prefer the guarded,
+# repeatable scripts documented in README.md; they inject the URL and Secret
+# in memory, exercise the complete matrix, and never commit either value.
 #
 # Example setup (the token must match AIOPS_ALERTMANAGER_WEBHOOK_SECRET):
 #   kubectl create namespace aiops-e2e
@@ -41,8 +40,9 @@ spec:
   receivers:
     - name: dsh-aiops
       webhookConfigs:
-        # Replace this address when DSH runs on another host.
-        - url: http://192.168.50.189:3081/alertmanager
+        # Intentionally non-routable placeholder; the repeatable setup script
+        # renders the real deployment-owned URL without changing this file.
+        - url: http://dsh-host.example.invalid:3081/alertmanager
           sendResolved: true
           timeout: 10s
           httpConfig:
