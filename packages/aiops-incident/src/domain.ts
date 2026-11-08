@@ -13,7 +13,8 @@ import type {
   AiopsRecommendation,
 } from './types.ts'
 
-const MAX_COLLECTION_ITEMS = 100
+/** Maximum evidence, hypothesis, or recommendation records in one incident state. */
+export const MAX_COLLECTION_ITEMS = 100
 const MAX_TEXT_CHARS = 2_000
 
 function boundedText(label: string): ZodType<string> {

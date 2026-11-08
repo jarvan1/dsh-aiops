@@ -23,6 +23,7 @@ import type { AiopsFeedbackId, AiopsOperatorFeedback } from './types.ts'
 
 export type * from './types.ts'
 export {
+  MAX_COLLECTION_ITEMS,
   aiopsIncidentProjectionSchema,
   decodeAiopsIncidentState,
   validateAiopsIncidentTransition,

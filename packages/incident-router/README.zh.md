@@ -8,7 +8,7 @@
 
 - 第一个被接受的 firing 告警创建第 1 轮。
 - 后续 firing 通知追加到同一个 Session。
-- resolved 通知追加到该 Session，并把告警表达式标记为已恢复；它不会自动关闭 AIOps 事件。
+- resolved 通知追加到该 Session，并把告警表达式标记为已恢复；模型被明确要求不要自行关闭 AIOps 事件。该恢复轮次结束后，Router 会确定性地追加携带原状态的 `resolved` 事件状态并附一条 `alert-recovery-*` 证据——幂等执行，且仅在存在报告且尚未 resolved 时写入。
 - resolved 之后再次 firing 会创建下一轮和新的 Session。
 - 完全相同的 delivery 重试是幂等的。使用不同认证内容复用发送方提供的 delivery id 会失败。
 - 并发的首批通知合并到一个确定性 Session；SQLite `BEGIN IMMEDIATE` 串行化 fingerprint 状态变更。

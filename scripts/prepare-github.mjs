@@ -10,6 +10,7 @@ const files = [
   'packages/aiops-alertmanager/lib/index.js',
   'packages/aiops-prometheus/lib/index.js',
   'packages/aiops-portal/lib/index.js',
+  'packages/incident-router/lib/index.js',
   'packages/tool-aiops-history/lib/index.js',
 ]
 

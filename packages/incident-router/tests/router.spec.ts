@@ -3,7 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Agent, CreateAgentOptions, ResumeAgentOptions } from '@deepseek-ai/dsh-agent'
-import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import type { AiopsEvidenceId, AiopsIncidentId, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import { Session, SessionId, appendPluginRecord, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   WebhookDeliveryId,
   WebhookSourceId,
@@ -68,29 +70,23 @@ function delivery(
 }
 
 function makeAgent(id: ReturnType<typeof SessionId>, cwd = '/workspace', manualIdle = false): FakeAgent {
-  const events: SessionEvent[] = []
   const followups: unknown[] = []
   let idle = Promise.resolve()
   let settle = () => {}
-  const session = {
+  // A real Session keeps plugin records (private #appendRecord) and event
+  // envelopes faithful to production, including the lifecycle closure writes.
+  const session = Session.create(id, undefined, {
+    version: 4,
     id,
-    header: { cwd },
-    ownEvents: () => events,
-    append(type: string, data: unknown, options?: { ignorable?: true }) {
-      const event = {
-        seq: events.length,
-        type,
-        data,
-        ...(options?.ignorable === true ? { ignorable: true } : {}),
-      } as unknown as SessionEvent
-      events.push(event)
-      return event
-    },
-  }
+    cwd,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    isSeeded: false,
+  })
   return {
     id,
     session,
-    events,
+    get events(): SessionEvent[] { return session.ownEvents() },
     followups,
     followup: message => {
       followups.push(message)
@@ -99,6 +95,28 @@ function makeAgent(id: ReturnType<typeof SessionId>, cwd = '/workspace', manualI
     whenIdle: () => idle,
     settle: () => { settle() },
   } as unknown as FakeAgent
+}
+
+/** Model-shaped complete incident report the diagnostic turn persists. */
+function report(status: AiopsIncidentState['status'] = 'investigating'): AiopsIncidentState {
+  return {
+    version: 1,
+    incidentId: brandString<AiopsIncidentId>('inc-link-1'),
+    title: 'Checkout latency spike',
+    severity: 'critical',
+    status,
+    evidence: [{
+      id: brandString<AiopsEvidenceId>('metric-latency-1'),
+      kind: 'metric',
+      summary: 'p99 latency above 4s for 10 minutes',
+    }],
+    hypotheses: [{
+      summary: 'upstream dependency saturation',
+      confidence: 'possible',
+      evidenceIds: [brandString<AiopsEvidenceId>('metric-latency-1')],
+    }],
+    recommendations: [{ action: 'Scale the checkout deployment', risk: 'medium' }],
+  }
 }
 
 const config = {
@@ -329,6 +347,80 @@ describe('AIOps incident router', () => {
     expect(test.create).toHaveBeenCalledTimes(2)
     expect(test.agents.size).toBe(2)
     expect([...test.agents.keys()][0]).not.toBe([...test.agents.keys()][1])
+  })
+
+  it('appends the deterministic resolved transition after a recovery turn settles', async () => {
+    const test = harness({ manualIdle: true })
+    const signal = new AbortController().signal
+    await test.rule().run(delivery('link-firing'), signal)
+    const agent = [...test.agents.values()][0]
+    if (agent === undefined) throw new Error('missing firing agent')
+    await test.rule().run(delivery('link-recovery', 'resolved'), signal)
+    agent.settle()
+    await vi.waitFor(() => expect(agent.followups).toHaveLength(2))
+    expect(JSON.stringify(agent.followups[1])).toContain('the router appends the deterministic resolved transition')
+    // The model persists an active report while the recovery turn runs.
+    appendPluginRecord(agent.session, 'plugin:aiops/incident-state', report())
+    agent.settle()
+    await vi.waitFor(() => {
+      const records = agent.events.filter(event => event.type === 'plugin:aiops/incident-state')
+      expect(records).toHaveLength(2)
+      const latest = records.at(-1)?.data as AiopsIncidentState
+      expect(latest.status).toBe('resolved')
+      expect(latest.incidentId).toBe('inc-link-1')
+      expect(latest.evidence.at(-1)?.id).toMatch(/^alert-recovery-/)
+      expect(latest.evidence.at(-1)?.kind).toBe('alert')
+      expect(latest.evidence.at(-1)?.summary).toContain('KubePodCrashLooping')
+      expect(latest.evidence.at(-1)?.summary).toContain('resolved at')
+      // The carried-forward report keeps the model's own evidence untouched.
+      expect(latest.evidence[0]?.id).toBe('metric-latency-1')
+      expect(latest.hypotheses).toHaveLength(1)
+    })
+  })
+
+  it('never appends a lifecycle transition for firing-only work', async () => {
+    const test = harness({ manualIdle: true })
+    await test.rule().run(delivery('firing-only'), new AbortController().signal)
+    const agent = [...test.agents.values()][0]
+    if (agent === undefined) throw new Error('missing agent')
+    appendPluginRecord(agent.session, 'plugin:aiops/incident-state', report())
+    agent.settle()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const records = agent.events.filter(event => event.type === 'plugin:aiops/incident-state')
+    expect(records).toHaveLength(1)
+    expect((records[0]?.data as AiopsIncidentState).status).toBe('investigating')
+  })
+
+  it('leaves an already-resolved incident untouched after recovery', async () => {
+    const test = harness({ manualIdle: true })
+    const signal = new AbortController().signal
+    await test.rule().run(delivery('already-firing'), signal)
+    const agent = [...test.agents.values()][0]
+    if (agent === undefined) throw new Error('missing agent')
+    await test.rule().run(delivery('already-recovery', 'resolved'), signal)
+    agent.settle()
+    await vi.waitFor(() => expect(agent.followups).toHaveLength(2))
+    appendPluginRecord(agent.session, 'plugin:aiops/incident-state', report('resolved'))
+    agent.settle()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(agent.events.filter(event => event.type === 'plugin:aiops/incident-state')).toHaveLength(1)
+  })
+
+  it('skips closure without a persisted report and still releases the fingerprint', async () => {
+    const test = harness({ manualIdle: true })
+    const signal = new AbortController().signal
+    await test.rule().run(delivery('quiet-firing'), signal)
+    const agent = [...test.agents.values()][0]
+    if (agent === undefined) throw new Error('missing agent')
+    await test.rule().run(delivery('quiet-recovery', 'resolved'), signal)
+    agent.settle()
+    await vi.waitFor(() => expect(agent.followups).toHaveLength(2))
+    agent.settle()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(agent.events.filter(event => event.type === 'plugin:aiops/incident-state')).toHaveLength(0)
+    // The released fingerprint slot lets the next firing alert open a new round.
+    await test.rule().run(delivery('next-firing'), signal)
+    await vi.waitFor(() => expect(test.create).toHaveBeenCalledTimes(2))
   })
 
   it('ignores configured noise while routing arbitrary alerts with fallback severity', async () => {

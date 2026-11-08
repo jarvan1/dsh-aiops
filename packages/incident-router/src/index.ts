@@ -6,12 +6,21 @@ import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-aiops-observability'
 import {
+  MAX_COLLECTION_ITEMS,
+  decodeAiopsIncidentState,
+  validateAiopsIncidentTransition,
+} from '@deepseek-ai/dsh-aiops-incident'
+import type { AiopsEvidence, AiopsEvidenceId, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
+import { brandString } from '@deepseek-ai/dsh-brand'
+import {
   LOCALE_PREFERENCE_FIELD,
   LOCALE_SETTINGS_NAMESPACE,
   type LocaleSettings,
 } from '@deepseek-ai/dsh-client-locale'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
+import { appendPluginRecord, pluginRecordOf } from '@deepseek-ai/dsh-session'
+import type { PluginRecord } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
 import {
@@ -310,7 +319,7 @@ function languageInstruction(locale: string): string {
 /** Build concise, machine-readable first-turn context. */
 function promptFor(event: AiopsAlertRouteEvent, locale: string): string {
   const lifecycle = event.alert.status === 'resolved'
-    ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure.'
+    ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure; the router appends the deterministic resolved transition after this turn completes.'
     : 'Investigate this firing alert with read-only evidence collection.'
   return [
     `AIOps Alertmanager route ${event.decision}, round ${String(event.round)}.`,
@@ -331,7 +340,7 @@ function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string)
   return [
     `AIOps grouped ${String(events.length)} Alertmanager deliveries for ${latest.fingerprint}, round ${String(latest.round)}.`,
     latest.alert.status === 'resolved'
-      ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure.'
+      ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure; the router appends the deterministic resolved transition after this turn completes.'
       : 'Investigate the grouped firing alerts with one read-only evidence pass.',
     languageInstruction(locale),
     'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use the newest diagnosis window below and account for every grouped delivery id. Separate facts from hypotheses and persist one complete current report with aiops_incident_report.',
@@ -569,6 +578,7 @@ export class AiopsIncidentRouter extends Service {
   ): Promise<void> {
     let agent: Agent | undefined
     let diagnosisStartedAt: number | undefined
+    let sessionId: string | undefined
     try {
       const routed = work.map(item => ({
         item,
@@ -586,6 +596,7 @@ export class AiopsIncidentRouter extends Service {
       if (routed.some(item => item.route.sessionId !== first.route.sessionId)) {
         throw new Error('incident router grouped alerts across Session rounds')
       }
+      sessionId = first.route.sessionId
       agent = await this.ensureAgent(first.route, first.item.alert, signal)
       const events: AiopsAlertRouteEvent[] = []
       const startedAt = Date.now()
@@ -647,9 +658,67 @@ export class AiopsIncidentRouter extends Service {
       if (diagnosisStartedAt !== undefined) {
         this.ctx.aiopsTelemetry.observeDiagnosticLatency((Date.now() - diagnosisStartedAt) / 1_000)
       }
-      this.release(key)
-      void this.drainPending().catch(error => this.ctx.logger.warn(error))
+      const finish = () => {
+        this.release(key)
+        void this.drainPending().catch(error => this.ctx.logger.warn(error))
+      }
+      const recovery = agent !== undefined ? work.find(item => item.alert.status === 'resolved') : undefined
+      if (agent === undefined || recovery === undefined || sessionId === undefined) {
+        finish()
+        return
+      }
+      // The deterministic lifecycle closure runs after the model turn, so it
+      // always observes the report the turn persisted, never a stale snapshot.
+      void this.settleResolved(agent, recovery, sessionId).finally(finish)
     })
+  }
+
+  /**
+   * Close the incident lifecycle after one recovery turn settles: append the
+   * carried-forward resolved state deterministically instead of trusting the
+   * model to resolve on its own. Idempotent — an already-resolved incident is
+   * left untouched, and a firing delivery after resolution opens a new Session
+   * before this can run again. Never throws; failures are logged and the
+   * fingerprint slot is still released.
+   */
+  private async settleResolved(
+    agent: Agent,
+    recovery: { readonly receivedAt: number; readonly alert: AlertmanagerAlert },
+    sessionId: string,
+  ): Promise<void> {
+    try {
+      let latest: PluginRecord | undefined
+      for (const event of agent.session.ownEvents()) {
+        const record = pluginRecordOf(event)
+        if (record?.type === 'plugin:aiops/incident-state') latest = record
+      }
+      if (latest === undefined) return
+      let current: AiopsIncidentState
+      try {
+        current = decodeAiopsIncidentState(latest.data)
+      } catch {
+        this.ctx.logger.warn(`incident router skipped lifecycle closure: latest incident record in Session ${sessionId} is invalid`)
+        return
+      }
+      if (current.status === 'resolved') return
+      const recoveredAt = new Date(recovery.receivedAt).toISOString()
+      const label = recovery.alert.labels['alertname'] ?? recovery.alert.fingerprint
+      const evidence: AiopsEvidence[] = current.evidence.length >= MAX_COLLECTION_ITEMS
+        ? current.evidence
+        : [...current.evidence, {
+            id: brandString<AiopsEvidenceId>(`alert-recovery-${String(recovery.receivedAt)}`),
+            kind: 'alert',
+            summary: `Alertmanager reported ${label} resolved at ${recoveredAt}; the router closed the incident lifecycle.`,
+          }]
+      const next: AiopsIncidentState = { ...current, status: 'resolved', evidence }
+      validateAiopsIncidentTransition(current, next)
+      appendPluginRecord(agent.session, 'plugin:aiops/incident-state', next)
+      if (!await this.ctx.sessions.flush(agent.session)) {
+        throw new Error(`incident router could not flush the resolved transition for Session ${sessionId}`)
+      }
+    } catch (error: unknown) {
+      this.ctx.logger.warn(`incident router could not close the incident lifecycle for Session ${sessionId}:`, error)
+    }
   }
 
   private routeEvent(work: QueuedRoute, route: AcceptedRoute): AiopsAlertRouteEvent {
@@ -771,6 +840,11 @@ export class AiopsIncidentRouter extends Service {
     }))
     if (!await this.ctx.sessions.flush(agent.session)) {
       throw new Error(`incident router could not flush Session inbox ${route.sessionId}`)
+    }
+    if (alert.status === 'resolved') {
+      void agent.whenIdle().finally(() => {
+        void this.settleResolved(agent, { receivedAt: delivery.receivedAt, alert }, route.sessionId)
+      })
     }
   }
 

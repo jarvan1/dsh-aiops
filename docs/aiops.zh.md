@@ -53,6 +53,8 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 首次 firing 创建第 1 轮；重复 firing 与 resolved 通知追加到同一个 Session；resolved 后再次 firing 会打开新一轮。`resolved` 仅表示告警表达式恢复。每个被接受的决策和标准化告警都会在模型可见 follow-up 前追加为 `aiops/alert-routed` v2。事件把 `startsAt` 规范化为 T0，并携带一组可稳定重放的窗口，以及明确的 Prometheus range、Kubernetes Event 和 Pod 日志参数。
 
+恢复轮次结束后，Router 以确定性的方式关闭生命周期，而不依赖模型自行收尾：它读取最近持久化的 `plugin:aiops/incident-state` 记录，若事件尚未 resolved，则追加携带原状态的 `resolved` 状态，并附一条 `alert-recovery-<receivedAt>` 证据，引用告警名和恢复时间。该写入幂等——已 resolved 的事件保持不动——恢复提示词也明确告知模型不要自行关闭生命周期。若在轮次结束与该追加之间发生崩溃，事件保持 active；下一次 firing 告警会照常打开新一轮。
+
 ## Capability 角色
 
 | Capability | Service Definition 与 Provider | Consumer |
@@ -71,7 +73,7 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 每个 `plugin:aiops/incident-state` 事件都包含完整当前 `AiopsIncidentState`：版本、稳定事件编号、标题、严重级别、状态、完整证据、假设与建议。只有在当前用户明确确认、修正或否定诊断后，Agent 才能追加 `plugin:aiops/operator-feedback`。反馈包含确定性 ID、`incidentId`、所审核的 `reportSeq`、verdict 与说明；修正还包含 correction，且从不改写报告。两条写入路径都在追加前后执行 Session 持久化检查点。
 
-`aiopsIncident` 投影采用最后一个有效写入，并校验恢复的缓存值及重放的每个事件。不提供单独的 invariant companion，因为不存在第二个权威观测：投影解码的事件本身就是持久事实来源，而工具会在提交下一事件前检查生命周期连续性。
+`aiopsIncident` 投影采用最后一个有效写入，并校验恢复的缓存值及重放的每个事件。不提供单独的 invariant companion，因为不存在第二个权威观测：投影解码的事件本身就是持久事实来源，而工具会在提交下一事件前检查生命周期连续性。事件状态有两个写入方：模型通过 `aiops_incident_report` 写入，incident router 在 Alertmanager 恢复轮次后通过确定性 resolved 转换写入；两者使用同一种记录类型并经过相同的生命周期校验。
 
 ## 诊断结论推送
 

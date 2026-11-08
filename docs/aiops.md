@@ -61,6 +61,8 @@ The versioned `aiops-routing` settings surface can change exclusions, severity n
 
 The first firing creates round 1; repeated firing and resolved notifications append to the same Session; firing after resolution opens a new round. `resolved` means only that the alert expression recovered. Every accepted decision and normalized alert is appended as `aiops/alert-routed` v2 before the model-visible follow-up. The event canonicalizes `startsAt` as T0 and contains one replay-stable window plus exact Prometheus range, Kubernetes Event, and Pod-log parameters.
 
+After a recovery turn settles, the router closes the lifecycle deterministically instead of trusting the model to do it: it reads the latest persisted `plugin:aiops/incident-state` record and, unless the incident is already resolved, appends the carried-forward state with status `resolved` plus one `alert-recovery-<receivedAt>` evidence entry citing the alert name and recovery time. The write is idempotent — an already-resolved incident is untouched — and the recovery prompt explicitly tells the model not to close the lifecycle itself. A crash between the settled turn and this append leaves the incident active; the next firing alert then opens a new round as usual.
+
 ## Capability roles
 
 | Capability | Service Definition and Provider | Consumer |
@@ -79,7 +81,7 @@ Each capability combines its Service Definition and current Provider in one pack
 
 Every `plugin:aiops/incident-state` event contains the complete current `AiopsIncidentState`: version, stable incident ID, title, severity, status, complete evidence, hypotheses, and recommendations. Only after the current user explicitly confirms, corrects, or rejects a diagnosis may the Agent append `plugin:aiops/operator-feedback`. Feedback has a deterministic ID, `incidentId`, reviewed `reportSeq`, verdict, and note; corrections also carry replacement wording and never rewrite the report. Both write paths checkpoint Session persistence before and after append.
 
-The `aiopsIncident` projection is last-valid-write-wins and validates both restored cache values and each replayed incident event. There is no separate invariant companion because there is no second authoritative observation: the projection decodes the event that is itself the durable source, while the tool checks lifecycle continuity before committing the next event.
+The `aiopsIncident` projection is last-valid-write-wins and validates both restored cache values and each replayed incident event. There is no separate invariant companion because there is no second authoritative observation: the projection decodes the event that is itself the durable source, while the tool checks lifecycle continuity before committing the next event. Two writers append incident state: the model through `aiops_incident_report`, and the incident router through the deterministic resolved transition after an Alertmanager recovery turn; both go through the same record type and lifecycle validation.
 
 ## Diagnosis delivery
 

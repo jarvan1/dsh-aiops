@@ -8,7 +8,7 @@ Durable Alertmanager fingerprint routing for DSH AIOps. The service registers on
 
 - The first accepted firing alert creates round 1.
 - A later firing notification appends to the same Session.
-- A resolved notification appends to that Session and marks the alert expression recovered; it does not close the AIOps incident automatically.
+- A resolved notification appends to that Session and marks the alert expression recovered; the model is instructed not to close the AIOps incident itself. Once that recovery turn settles, the router deterministically appends the carried-forward `resolved` incident state with one `alert-recovery-*` evidence entry — idempotently, and only when a report exists and is not already resolved.
 - A firing notification after resolution creates the next round and a new Session.
 - An exact delivery retry is idempotent. Reusing a supplied delivery id with different authenticated bytes fails.
 - Concurrent first notifications coalesce on one deterministic Session, while SQLite `BEGIN IMMEDIATE` serializes fingerprint state changes.

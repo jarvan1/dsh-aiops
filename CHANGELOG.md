@@ -4,6 +4,16 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-08 — Alert-recovery lifecycle linkage
+
+### Added
+
+- Added deterministic alert-recovery linkage in the incident router: after an Alertmanager recovery turn settles, the router reads the latest persisted `plugin:aiops/incident-state` record and, unless the incident is already resolved, appends the carried-forward state with status `resolved` plus one `alert-recovery-<receivedAt>` evidence entry citing the alert name and recovery time. The write is idempotent, runs through the same lifecycle validation as model reports, and the recovery prompt now states that the router performs the closure.
+
+### Validation
+
+- Full build, 25 test files and 176 tests pass (one opt-in real-cluster test remains skipped), GitHub source-package preparation, link check, and `git diff --check` pass. The router suite now runs its fake agents on real `Session` instances, and the four new tests cover the resolved transition append, the firing-only no-op, the already-resolved skip, and fingerprint release without a persisted report.
+
 ## Unreleased — 2026-11-08 — Diagnosis IM delivery (aiops-delivery)
 
 ### Added

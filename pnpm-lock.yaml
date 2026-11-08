@@ -432,6 +432,9 @@ importers:
       '@deepseek-ai/dsh-aiops-observability':
         specifier: workspace:^
         version: link:../aiops-observability
+      '@deepseek-ai/dsh-brand':
+        specifier: ^0.2.2-rc.1
+        version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
       '@deepseek-ai/dsh-llm':
         specifier: ^0.2.2-rc.1
         version: 0.2.2-rc.1(@deepseek-ai/cordis@4.1.0)
