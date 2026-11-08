@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
-import { SessionSeq, type SessionId } from '@deepseek-ai/dsh-session'
+import { pluginRecordOf, SessionSeq, type SessionId } from '@deepseek-ai/dsh-session'
 import {
   decodeAiopsIncidentState,
   decodeAiopsOperatorFeedback,
@@ -30,6 +30,15 @@ export const inject = ['tools', 'systemPrompt', 'sessionQuery']
 
 /** Default maximum incident records returned by one call. */
 export const DEFAULT_LIMIT = 20
+
+/**
+ * DSH 0.2.x carries durable incident state as ignorable plugin records; the
+ * query seam indexes them like any committed event but its released types
+ * predate the plugin-record grammar, so hits compare by record-type string.
+ */
+const INCIDENT_RECORD_TYPE = 'plugin:aiops/incident-state'
+const FEEDBACK_RECORD_TYPE = 'plugin:aiops/operator-feedback'
+
 /** Maximum accepted incident result count. */
 export const DEFAULT_MAX_LIMIT = 100
 /** Maximum sessions inspected by one list operation. */
@@ -269,7 +278,7 @@ async function listIncidents(
   for (const session of sessions.slice(0, maxScanSessions)) {
     signal.throwIfAborted()
     const events = (await ctx.sessionQuery.listEvents(session.header.id))
-      .filter(event => event.type === 'aiops/incident-state')
+      .filter(event => event.type === (INCIDENT_RECORD_TYPE as typeof event.type))
     for (const event of events) records.push(await readIncidentHit(ctx, event, signal))
   }
   return records.sort(compareNewest).slice(0, limit)
@@ -295,14 +304,15 @@ async function getIncident(
   }
   const window = await ctx.sessionQuery.readEvent({ sessionId, seq: SessionSeq(seqValue) }, signal)
   if (window.session.id !== sessionId || !headerAuthorized(window.session.cwd, caller)) throw unauthorized()
-  if (window.target.type !== 'aiops/incident-state') {
+  const record = pluginRecordOf(window.target)
+  if (record === undefined || record.type !== INCIDENT_RECORD_TYPE) {
     throw new HarnessError('The cited Session event is not an AIOps incident record.', 'AIOPS_HISTORY_EVENT_NOT_INCIDENT')
   }
   return {
     sessionId,
-    seq: window.target.seq,
-    time: window.target.time,
-    incident: decodeAiopsIncidentState(window.target.data),
+    seq: record.seq,
+    time: record.time,
+    incident: decodeAiopsIncidentState(record.data),
   }
 }
 
@@ -320,7 +330,7 @@ async function searchIncidents(
   for (const session of sessions.slice(0, maxScanSessions)) {
     signal.throwIfAborted()
     const events = (await ctx.sessionQuery.listEvents(session.header.id))
-      .filter(event => event.type === 'aiops/incident-state')
+      .filter(event => event.type === (INCIDENT_RECORD_TYPE as typeof event.type))
     for (const event of events) {
       const record = await readIncidentHit(ctx, event, signal)
       if (matcher.test(incidentSearchText(record.incident))) records.push(record)
@@ -344,7 +354,7 @@ async function listFeedback(
   for (const session of sessions.slice(0, maxScanSessions)) {
     signal.throwIfAborted()
     const events = (await ctx.sessionQuery.listEvents(session.header.id))
-      .filter(event => event.type === 'aiops/operator-feedback')
+      .filter(event => event.type === (FEEDBACK_RECORD_TYPE as typeof event.type))
     for (const event of events) {
       const record = await readFeedbackHit(ctx, event, signal)
       if (matcher === undefined || matcher.test(feedbackSearchText(record.feedback))) records.push(record)
@@ -360,14 +370,15 @@ async function readFeedbackHit(
   signal: AbortSignal,
 ): Promise<FeedbackRecord> {
   const window = await ctx.sessionQuery.readEvent({ sessionId: hit.sessionId, seq: hit.seq }, signal)
-  if (window.target.type !== 'aiops/operator-feedback') {
+  const record = pluginRecordOf(window.target)
+  if (record === undefined || record.type !== FEEDBACK_RECORD_TYPE) {
     throw new HarnessError('The feedback index cited a non-feedback event.', 'AIOPS_HISTORY_INDEX_MISMATCH')
   }
   return {
     sessionId: hit.sessionId,
     seq: hit.seq,
     time: hit.time,
-    feedback: decodeAiopsOperatorFeedback(window.target.data),
+    feedback: decodeAiopsOperatorFeedback(record.data),
   }
 }
 
@@ -377,15 +388,16 @@ async function readIncidentHit(
   signal: AbortSignal,
 ): Promise<IncidentRecord> {
   const window = await ctx.sessionQuery.readEvent({ sessionId: hit.sessionId, seq: hit.seq }, signal)
-  /* v8 ignore next 3 -- a filtered hit and its append-only seq have one immutable event type. */
-  if (window.target.type !== 'aiops/incident-state') {
+  const record = pluginRecordOf(window.target)
+  /* v8 ignore next 3 -- a filtered hit and its append-only seq have one immutable record type. */
+  if (record === undefined || record.type !== INCIDENT_RECORD_TYPE) {
     throw new HarnessError('The incident index cited a non-incident event.', 'AIOPS_HISTORY_INDEX_MISMATCH')
   }
   return {
     sessionId: hit.sessionId,
     seq: hit.seq,
     time: hit.time,
-    incident: decodeAiopsIncidentState(window.target.data),
+    incident: decodeAiopsIncidentState(record.data),
   }
 }
 

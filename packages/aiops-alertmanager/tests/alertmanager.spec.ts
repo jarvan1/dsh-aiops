@@ -1,14 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { AlertmanagerHttpRuntime } from '../src/index.ts'
-
-class MemorySettings extends SettingsProvider {
-  readonly writable = true
-  protected load(): Promise<Record<string, unknown>> { return Promise.resolve({}) }
-  protected persist(_ns: SettingsNamespace, _section: Record<string, unknown>): Promise<void> { return Promise.resolve() }
-}
 
 const alerts = JSON.stringify([{
   labels: { alertname: 'HighLatency', service: 'payments' },
@@ -35,24 +28,17 @@ describe('AlertmanagerHttpRuntime', () => {
     })
   })
 
-  it('uses a URL saved through the live DSH settings section', async () => {
-    const ctx = new Context()
-    await ctx.plugin(MemorySettings)
+  it('serves the configured entry URL; DSH 0.2.x applies settings edits by reloading the entry', async () => {
     let requested: URL | undefined
-    const runtime = new AlertmanagerHttpRuntime(ctx, { baseUrl: 'http://old.alerts.test' }, (input) => {
+    const runtime = new AlertmanagerHttpRuntime(new Context(), { baseUrl: 'http://new.alerts.test/alertmanager' }, (input) => {
       requested = new URL(input instanceof Request ? input.url : input.toString())
       return Promise.resolve(new Response('[]'))
     })
-    await vi.waitFor(() => {
-      expect(ctx.settings.describe().map(row => String(row.ns))).toContain('aiops-alertmanager')
-    })
-    await ctx.settings.update('aiops-alertmanager', { baseUrl: 'http://new.alerts.test/alertmanager' })
 
     await runtime.alerts(runtime.resolveAlerts({}))
 
     expect(requested?.host).toBe('new.alerts.test')
     expect(requested?.pathname).toBe('/alertmanager/api/v2/alerts')
-    await ctx.fiber.dispose()
   })
 
   it('resolves API defaults and reads current alerts below a path prefix', async () => {

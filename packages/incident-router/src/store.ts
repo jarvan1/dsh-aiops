@@ -138,7 +138,7 @@ export class IncidentRouteStore {
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec('PRAGMA journal_mode = WAL')
     const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
-    if (version.user_version < 0 || version.user_version > 3) {
+    if (version.user_version < 0 || version.user_version > 4) {
       this.db.close()
       throw new Error(`incident router schema version ${String(version.user_version)} is unsupported`)
     }
@@ -243,7 +243,11 @@ export class IncidentRouteStore {
         next_json TEXT NOT NULL,
         recorded_at INTEGER NOT NULL
       ) STRICT;
-      PRAGMA user_version = 3;
+      CREATE TABLE IF NOT EXISTS store_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      ) STRICT;
+      PRAGMA user_version = 4;
     `)
     this.recoverProcessingWork(Date.now())
   }
@@ -687,6 +691,36 @@ export class IncidentRouteStore {
       recordedAt: row.recorded_at,
       attempt: row.attempt,
     }))
+  }
+
+  /**
+   * Newest known committed policy: the durable baseline when present, else the
+   * newest audit `next_json`. Combined with {@link saveRoutingPolicyBaseline},
+   * this lets a reloaded instance detect the policy its predecessor ran.
+   */
+  lastRoutingPolicy(): RoutingSettings | undefined {
+    const baseline = this.db.prepare('SELECT value FROM store_meta WHERE key = ?').get('routing_policy_baseline') as { value: string } | undefined
+    const source = baseline?.value
+    if (source !== undefined) return this.parseRoutingPolicy(source)
+    const row = this.db.prepare(`
+      SELECT next_json FROM routing_policy_audit ORDER BY recorded_at DESC, audit_id DESC LIMIT 1
+    `).get() as { next_json: string } | undefined
+    return row === undefined ? undefined : this.parseRoutingPolicy(row.next_json)
+  }
+
+  /** Durable baseline for the policy the running instance last adopted. */
+  saveRoutingPolicyBaseline(policy: RoutingSettings): void {
+    this.db.prepare(`
+      INSERT INTO store_meta (key, value) VALUES ('routing_policy_baseline', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(JSON.stringify(policy))
+  }
+
+  private parseRoutingPolicy(raw: string): RoutingSettings | undefined {
+    try {
+      const parsed = JSON.parse(raw) as RoutingSettings
+      return typeof parsed === 'object' && parsed !== null ? parsed : undefined
+    } catch { return undefined }
   }
 
   /** Persist one settings commit without embedding operator identity or secrets. */

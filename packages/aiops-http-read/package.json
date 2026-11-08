@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-aiops-http-read",
   "description": "Shared bounded read-only HTTP transport primitive for DSH AIOps providers",
-  "version": "0.1.2-rc.1",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -21,11 +21,11 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-timeout": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-timeout": "^0.2.2-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-timeout": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-timeout": "^0.2.2-rc.1"
   }
 }

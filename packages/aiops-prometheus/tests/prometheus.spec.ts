@@ -1,14 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
-import { SettingsProvider, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { PrometheusHttpRuntime } from '../src/index.ts'
-
-class MemorySettings extends SettingsProvider {
-  readonly writable = true
-  protected load(): Promise<Record<string, unknown>> { return Promise.resolve({}) }
-  protected persist(_ns: SettingsNamespace, _section: Record<string, unknown>): Promise<void> { return Promise.resolve() }
-}
 
 const success = JSON.stringify({
   status: 'success',
@@ -32,24 +25,17 @@ describe('PrometheusHttpRuntime', () => {
     })
   })
 
-  it('uses a URL saved through the live DSH settings section', async () => {
-    const ctx = new Context()
-    await ctx.plugin(MemorySettings)
+  it('serves the configured entry URL; DSH 0.2.x applies settings edits by reloading the entry', async () => {
     let requested: URL | undefined
-    const runtime = new PrometheusHttpRuntime(ctx, { baseUrl: 'http://old.metrics.test' }, (input) => {
+    const runtime = new PrometheusHttpRuntime(new Context(), { baseUrl: 'http://new.metrics.test/prometheus' }, (input) => {
       requested = new URL(input instanceof Request ? input.url : input.toString())
       return Promise.resolve(new Response(success))
     })
-    await vi.waitFor(() => {
-      expect(ctx.settings.describe().map(row => String(row.ns))).toContain('aiops-prometheus')
-    })
-    await ctx.settings.update('aiops-prometheus', { baseUrl: 'http://new.metrics.test/prometheus' })
 
     await runtime.query({ query: 'up' })
 
     expect(requested?.host).toBe('new.metrics.test')
     expect(requested?.pathname).toBe('/prometheus/api/v1/query')
-    await ctx.fiber.dispose()
   })
 
   it('encodes an instant query below a configured path prefix', async () => {

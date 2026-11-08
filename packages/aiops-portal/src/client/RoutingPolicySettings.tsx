@@ -110,8 +110,9 @@ export function RoutingPolicySettings({ routingSettings, dryRunRoutingPolicy, au
     if (!writable || !tested || candidate === undefined) return
     setStatus('saving')
     try {
+      // The router entry Config carries these policy fields directly; `version`
+      // is the policy-payload contract, not a stored field.
       await routingSettings.mutate([
-        { op: 'set', path: ['version'], value: 1 },
         { op: 'set', path: ['routingPolicy'], value: candidate.routingPolicy },
         { op: 'set', path: ['severityMap'], value: candidate.severityMap },
         { op: 'set', path: ['modelBudgets'], value: candidate.modelBudgets },

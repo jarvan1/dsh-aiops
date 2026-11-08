@@ -16,7 +16,7 @@ Alertmanager、Prometheus 与 Kubernetes 包都把 Service Definition 和当前�
 
 所有采集工具在结构上都是只读的。Alertmanager Provider 只对当前告警发出 GET 请求；Kubernetes Consumer 不暴露原始命令或不受限参数，其 Provider 只构造固定的 get、list、Event 与有界非流式日志读取；Prometheus 也只暴露查询端点。部署仍负责端点 ACL、kubeconfig 与只读 RBAC。
 
-每次接受的事件写入都在 `aiops/incident-state` 中携带完整当前 `AiopsIncidentState`。稳定的品牌化事件与证据 ID、证据引用检查、不可变事件 ID 和终态 `resolved` 都在追加前校验；Session 持久化会在写入前后各建立一次检查点。`aiopsIncident` 投影解码该持久事件并使用最后一个有效状态。
+每次接受的事件写入都在 `plugin:aiops/incident-state` 中携带完整当前 `AiopsIncidentState`。稳定的品牌化事件与证据 ID、证据引用检查、不可变事件 ID 和终态 `resolved` 都在追加前校验；Session 持久化会在写入前后各建立一次检查点。`aiopsIncident` 投影解码该持久事件并使用最后一个有效状态。
 
 现有 Session 日志与投影栈负责该子系统的持久化。独立事件数据库不是权威来源，而且在具备维护中的运维手册语料库、访问规则、引用、时效策略与评测前不引入 RAG 流水线。SQLite 跨 Session 索引是基于 Session 事件的可重建读模型，具体由[事件历史决策](2026-09-05-aiops-cross-session-incident-history.zh.md)规定。
 

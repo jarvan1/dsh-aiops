@@ -223,8 +223,8 @@ describe('AIOps Portal read model', () => {
     const older = incident().incident
     const latest = { ...older, title: 'Latest diagnosis' }
     const reportHits = [
-      { sessionId: 'aiops-session-1', seq: 2, time: 900, type: 'aiops/incident-state' },
-      { sessionId: 'aiops-session-1', seq: 3, time: 1_000, type: 'aiops/incident-state' },
+      { sessionId: 'aiops-session-1', seq: 2, time: 900, type: 'plugin:aiops/incident-state' },
+      { sessionId: 'aiops-session-1', seq: 3, time: 1_000, type: 'plugin:aiops/incident-state' },
     ]
     const ctx = {
       aiopsIncidentRouter: {
@@ -236,7 +236,7 @@ describe('AIOps Portal read model', () => {
       sessionQuery: {
         filterSessions: vi.fn(async () => [{ header: { id: 'aiops-session-1' } }]),
         listEvents: vi.fn(async () => reportHits),
-        readEvent: vi.fn(async ({ seq }: { seq: number }) => ({ target: { type: 'aiops/incident-state', data: seq === 3 ? latest : older } })),
+        readEvent: vi.fn(async ({ seq }: { seq: number }) => ({ target: { type: 'plugin:aiops/incident-state', ignorable: true, data: seq === 3 ? latest : older } })),
       },
     }
     const snapshot = await readPortalSnapshot(ctx as never, { maxIncidents: 10, maxAuditRecords: 10, maxScanSessions: 10 })

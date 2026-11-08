@@ -1,4 +1,7 @@
 import { Context } from '@deepseek-ai/cordis'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Agent, CreateAgentOptions, ResumeAgentOptions } from '@deepseek-ai/dsh-agent'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
@@ -137,7 +140,6 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
   create: ReturnType<typeof vi.fn>
   resume: ReturnType<typeof vi.fn>
   attach: ReturnType<typeof vi.fn>
-  updatePolicy: (next: RoutingSettings) => void
   router: AiopsIncidentRouter
 } {
   const ctx = new Context()
@@ -156,39 +158,21 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     return { agent, dispose: async () => { agents.delete(input.resumeSessionId) } }
   })
   const attach = vi.fn(async () => {})
-  let routingSettings: RoutingSettings | undefined
-  const policyWatchers = new Set<(next: RoutingSettings, previous: RoutingSettings) => void>()
   ctx.provide('agents', {
     get: (id: string) => agents.get(id),
     create,
     resume,
   } as never)
   ctx.provide('agentDefaultModel', { currentSelection: () => ({ provider: 'deepseek', model: 'chat' }) } as never)
-  ctx.provide('agentPresets', {
-    resolve: async (id: string) => ({ id }),
-    standingKeyFor: async () => 'standing',
-    mount: async () => {},
-  } as never)
   ctx.provide('permissionPresets', { resolve: vi.fn(), set: vi.fn() } as never)
   ctx.provide('sessionPersistence', {
     stat: async (id: string) => options.persisted ? { id, revision: 'r1' } : undefined,
   } as never)
   ctx.provide('settings', {
-    get: (namespace: string) => namespace === 'locale'
-      ? options.locale === undefined ? {} : { preference: options.locale }
-      : undefined,
-    register: (_namespace: string, _schema: unknown, registration: { base?: unknown }) => {
-      routingSettings = registration.base as RoutingSettings
-      return {
-      get: () => routingSettings,
-      watch: (callback: (next: RoutingSettings, previous: RoutingSettings) => void) => {
-        policyWatchers.add(callback)
-        return () => { policyWatchers.delete(callback) }
-      },
-      update: vi.fn(),
-      replace: vi.fn(),
-      }
-    },
+    describe: () => [{
+      ns: 'locale',
+      value: options.locale === undefined ? {} : { preference: options.locale },
+    }],
   } as never)
   ctx.provide('sessions', { flush: async () => true } as never)
   ctx.provide('sessionTitle', { rename: vi.fn() } as never)
@@ -219,11 +203,6 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     create,
     resume,
     attach,
-    updatePolicy: (next) => {
-      const previous = routingSettings!
-      routingSettings = next
-      for (const watcher of policyWatchers) watcher(next, previous)
-    },
     router,
   }
 }
@@ -247,27 +226,37 @@ describe('AIOps incident router', () => {
     expect(cleanInstall.alertnameAllowlist).toEqual([])
   })
 
-  it('applies versioned routing settings live, supports dry-run, and audits changes', async () => {
-    const test = harness()
-    const current = test.router.routingSettings()
-    const next: RoutingSettings = {
-      ...current,
-      routingPolicy: { ignoredAlertnames: ['VendorHeartbeat'], defaultSeverity: 'critical' },
+  it('supports candidate dry-run and audits a policy change adopted through entry reload', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'aiops-router-spec-'))
+    const statePath = join(directory, 'router.sqlite')
+    try {
+      const first = harness({ config: { ...config, statePath } })
+      const current = first.router.routingSettings()
+      const next: RoutingSettings = {
+        ...current,
+        routingPolicy: { ignoredAlertnames: ['VendorHeartbeat'], defaultSeverity: 'critical' },
+      }
+      expect(first.router.dryRun({ alertname: 'VendorHeartbeat' }, next)).toMatchObject({
+        accepted: false,
+        reason: 'alertname-ignored',
+      })
+
+      // DSH 0.2.x applies a committed settings edit by reloading the entry, so
+      // the next instance adopts the changed config and reconciles the audit.
+      const second = harness({ config: { ...config, statePath, routingPolicy: next.routingPolicy } })
+      const policyDelivery = delivery('policy-filtered', 'firing', alert('firing', {
+        labels: { alertname: 'VendorHeartbeat' },
+        fingerprint: 'aaaaaaaaaaaaaaaa',
+      }))
+      await second.rule().run(policyDelivery, new AbortController().signal)
+      expect(second.create).not.toHaveBeenCalled()
+      expect(second.router.routingSettings()).toEqual(next)
+      expect(second.router.listPolicyAudit({ limit: 10 })).toEqual([
+        expect.objectContaining({ version: 1, changedFields: ['routingPolicy'], previous: current, next }),
+      ])
+    } finally {
+      await rm(directory, { recursive: true, force: true })
     }
-    expect(test.router.dryRun({ alertname: 'VendorHeartbeat' }, next)).toMatchObject({
-      accepted: false,
-      reason: 'alertname-ignored',
-    })
-    test.updatePolicy(next)
-    await test.rule().run(delivery('policy-filtered', 'firing', alert('firing', {
-      labels: { alertname: 'VendorHeartbeat' },
-      fingerprint: 'aaaaaaaaaaaaaaaa',
-    })), new AbortController().signal)
-    expect(test.create).not.toHaveBeenCalled()
-    expect(test.router.routingSettings()).toEqual(next)
-    expect(test.router.listPolicyAudit({ limit: 10 })).toEqual([
-      expect.objectContaining({ version: 1, changedFields: ['routingPolicy'], previous: current, next }),
-    ])
   })
 
   it('creates one deterministic Session and appends later firing and resolved deliveries', async () => {

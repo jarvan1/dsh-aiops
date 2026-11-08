@@ -16,7 +16,7 @@ The Alertmanager, Prometheus, and Kubernetes packages each combine their Service
 
 All acquisition tools are structurally read-only. The Alertmanager Provider issues only GET requests for current alerts; the Kubernetes Consumer exposes no raw command or unrestricted argument, and its Provider constructs only fixed get, list, Event, and bounded non-streaming log reads; Prometheus exposes only query endpoints. Deployment still owns endpoint ACLs, kubeconfig, and read-only RBAC.
 
-Every accepted incident write carries the complete current `AiopsIncidentState` in `aiops/incident-state`. Stable branded incident and evidence IDs, evidence-reference checks, immutable incident identity, and terminal `resolved` state are validated before append; Session persistence is checkpointed before and after the write. The `aiopsIncident` projection decodes the durable event and uses the latest valid state.
+Every accepted incident write carries the complete current `AiopsIncidentState` in `plugin:aiops/incident-state`. Stable branded incident and evidence IDs, evidence-reference checks, immutable incident identity, and terminal `resolved` state are validated before append; Session persistence is checkpointed before and after the write. The `aiopsIncident` projection decodes the durable event and uses the latest valid state.
 
 The existing Session log and projection stack own persistence for the subsystem. No separate incident database is authoritative, and no RAG pipeline is included before a maintained runbook corpus, access rules, citations, freshness policy, and evaluations exist. The SQLite cross-Session index is a rebuildable read model over Session events, as specified by the [incident-history decision](2026-09-05-aiops-cross-session-incident-history.md).
 

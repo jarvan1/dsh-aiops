@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-aiops-prometheus",
   "description": "Read-only Prometheus query capability and HTTP provider for DSH AIOps",
-  "version": "0.1.2-rc.1",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -22,18 +22,18 @@
   "license": "MIT",
   "dependencies": {
     "@deepseek-ai/dsh-aiops-http-read": "workspace:^",
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@deepseek-ai/schemastery": "^3.19.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-util-values": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-settings": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-timeout": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-util-values": "^0.2.2-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-timeout": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-util-values": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-settings": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-timeout": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-util-values": "^0.2.2-rc.1"
   }
 }

@@ -31,12 +31,12 @@ import type {
   PrometheusTargetsRequest,
   PrometheusTargetsResult,
 } from '@deepseek-ai/dsh-aiops-prometheus'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import * as ObserveTools from '../src/index.ts'
+import { executeTestTool, installTestToolExecutor } from '../../../tests/helpers/tool-executor.ts'
 
 class FakeAlertmanager extends AlertmanagerRuntime {
   readonly requests: AlertmanagerAlertsRequest[] = []
@@ -189,14 +189,14 @@ describe('AIOps observation tools through a real Loader composition', () => {
     } as unknown as NonNullable<typeof ctx.loader.internal>
     await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
     await ctx.loader.await()
+    installTestToolExecutor(ctx)
 
     expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
       'alertmanager_alerts', 'prometheus_query', 'prometheus_query_range', 'prometheus_rules',
       'prometheus_targets', 'prometheus_discovery', 'kubernetes_get',
       'kubernetes_list', 'kubernetes_events', 'kubernetes_logs',
     ])
-    const alertResult = await ctx.tools.execute({
-      callId: ToolCallId('alerts'),
+    const alertResult = await executeTestTool(ctx, {
       name: 'alertmanager_alerts',
       arguments: {
         active: false,
@@ -207,7 +207,6 @@ describe('AIOps observation tools through a real Loader composition', () => {
         receiver: 'oncall-.*',
         receiver_matchers: ['owner="payments"'],
       },
-      signal: new AbortController().signal,
     })
     expect(alertResult.isError).toBe(false)
     const alertmanagerRuntime = ctx.alertmanager as FakeAlertmanager
@@ -220,36 +219,29 @@ describe('AIOps observation tools through a real Loader composition', () => {
       receiver: 'oncall-.*',
       receiverMatchers: ['owner="payments"'],
     })
-    await ctx.tools.execute({
-      callId: ToolCallId('alerts-defaults'),
+    await executeTestTool(ctx, {
       name: 'alertmanager_alerts',
       arguments: {},
-      signal: new AbortController().signal,
     })
     expect(alertmanagerRuntime.requests[1]).toEqual({})
-    const metrics = await ctx.tools.execute({
-      callId: ToolCallId('metrics'),
+    const metrics = await executeTestTool(ctx, {
       name: 'prometheus_query',
       arguments: { query: 'up' },
-      signal: new AbortController().signal,
     })
     expect(metrics.isError).toBe(false)
     if (metrics.isError) throw new Error('expected metrics success')
     expect(metrics.value).toEqual({ resultType: 'vector', result: [{ metric: {}, value: [1, 'up'] }] })
 
-    const range = await ctx.tools.execute({
-      callId: ToolCallId('metrics-range'),
+    const range = await executeTestTool(ctx, {
       name: 'prometheus_query_range',
       arguments: { query: 'up', start: '1', end: '2', step: '30s' },
-      signal: new AbortController().signal,
     })
     expect(range.isError).toBe(false)
     if (range.isError) throw new Error('expected metrics range success')
     expect(range.value).toEqual({ resultType: 'matrix', result: [] })
 
     const prometheusRuntime = ctx.prometheus as FakePrometheus
-    const rules = await ctx.tools.execute({
-      callId: ToolCallId('prometheus-rules'),
+    const rules = await executeTestTool(ctx, {
       name: 'prometheus_rules',
       arguments: {
         alert_name: 'TargetDown',
@@ -257,7 +249,6 @@ describe('AIOps observation tools through a real Loader composition', () => {
         generator_url: 'https://metrics.test/graph?g0.expr=up',
         limit: 5,
       },
-      signal: new AbortController().signal,
     })
     expect(rules.isError).toBe(false)
     expect(prometheusRuntime.ruleRequests).toEqual([{
@@ -267,8 +258,7 @@ describe('AIOps observation tools through a real Loader composition', () => {
       limit: 5,
     }])
 
-    const targets = await ctx.tools.execute({
-      callId: ToolCallId('prometheus-targets'),
+    const targets = await executeTestTool(ctx, {
       name: 'prometheus_targets',
       arguments: {
         label_matchers: [{ name: 'job', value: 'api' }],
@@ -276,7 +266,6 @@ describe('AIOps observation tools through a real Loader composition', () => {
         state: 'active',
         limit: 3,
       },
-      signal: new AbortController().signal,
     })
     expect(targets.isError).toBe(false)
     expect(prometheusRuntime.targetRequests).toEqual([{
@@ -286,8 +275,7 @@ describe('AIOps observation tools through a real Loader composition', () => {
       limit: 3,
     }])
 
-    const discovery = await ctx.tools.execute({
-      callId: ToolCallId('prometheus-discovery'),
+    const discovery = await executeTestTool(ctx, {
       name: 'prometheus_discovery',
       arguments: {
         kind: 'label_values',
@@ -297,7 +285,6 @@ describe('AIOps observation tools through a real Loader composition', () => {
         end: '2026-09-08T00:30:00Z',
         limit: 10,
       },
-      signal: new AbortController().signal,
     })
     expect(discovery.isError).toBe(false)
     expect(prometheusRuntime.discoveryRequests).toEqual([{
@@ -310,11 +297,9 @@ describe('AIOps observation tools through a real Loader composition', () => {
     }])
 
     const session = ctx.sessions.create(SessionId('aiops-loader'), { meta: { cwd: '/workspace' } })
-    const kubernetes = await ctx.tools.execute({
-      callId: ToolCallId('kubernetes'),
+    const kubernetes = await executeTestTool(ctx, {
       name: 'kubernetes_get',
       arguments: { resource: 'pod', name: 'api-1' },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(kubernetes.isError).toBe(false)
@@ -322,8 +307,7 @@ describe('AIOps observation tools through a real Loader composition', () => {
     expect(kubernetes.value).toEqual({ kind: 'pod', metadata: { name: 'api-1' } })
 
     const kubernetesRuntime = ctx.kubernetes as FakeKubernetes
-    const list = await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-list'),
+    const list = await executeTestTool(ctx, {
       name: 'kubernetes_list',
       arguments: {
         resource: 'pods',
@@ -331,7 +315,6 @@ describe('AIOps observation tools through a real Loader composition', () => {
         label_selector: 'app=api',
         field_selector: 'status.phase=Running',
       },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(list.isError).toBe(false)
@@ -342,17 +325,14 @@ describe('AIOps observation tools through a real Loader composition', () => {
       labelSelector: 'app=api',
       fieldSelector: 'status.phase=Running',
     })
-    await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-list-defaults'),
+    await executeTestTool(ctx, {
       name: 'kubernetes_list',
       arguments: { resource: 'services' },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(kubernetesRuntime.lists[1]).toEqual({ cwd: '/workspace', resource: 'services' })
 
-    await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-events'),
+    await executeTestTool(ctx, {
       name: 'kubernetes_events',
       arguments: {
         namespace: 'payments',
@@ -361,14 +341,11 @@ describe('AIOps observation tools through a real Loader composition', () => {
         since_time: '2026-09-06T00:45:00Z',
         until_time: '2026-09-06T01:15:00Z',
       },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
-    await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-events-defaults'),
+    await executeTestTool(ctx, {
       name: 'kubernetes_events',
       arguments: {},
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(kubernetesRuntime.eventsRequests).toEqual([{
@@ -380,8 +357,7 @@ describe('AIOps observation tools through a real Loader composition', () => {
       untilTime: '2026-09-06T01:15:00Z',
     }, { cwd: '/workspace' }])
 
-    const logs = await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-logs'),
+    const logs = await executeTestTool(ctx, {
       name: 'kubernetes_logs',
       arguments: {
         pod: 'api-1',
@@ -392,17 +368,14 @@ describe('AIOps observation tools through a real Loader composition', () => {
         since: '15m',
         timestamps: true,
       },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(logs.isError).toBe(false)
     if (logs.isError) throw new Error('expected Kubernetes logs success')
     expect(logs.content).toEqual([{ type: 'text', text: 'ready\n' }])
-    await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-logs-defaults'),
+    await executeTestTool(ctx, {
       name: 'kubernetes_logs',
       arguments: { pod: 'api-2' },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(kubernetesRuntime.logRequests).toEqual([{
@@ -416,8 +389,7 @@ describe('AIOps observation tools through a real Loader composition', () => {
       timestamps: true,
     }, { cwd: '/workspace', pod: 'api-2' }])
 
-    await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-logs-absolute'),
+    await executeTestTool(ctx, {
       name: 'kubernetes_logs',
       arguments: {
         pod: 'api-3',
@@ -425,7 +397,6 @@ describe('AIOps observation tools through a real Loader composition', () => {
         until_time: '2026-09-06T01:15:00Z',
         tail_lines: 1000,
       },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(kubernetesRuntime.logRequests[2]).toEqual({
@@ -436,11 +407,9 @@ describe('AIOps observation tools through a real Loader composition', () => {
       tailLines: 1000,
     })
 
-    const missingSession = await ctx.tools.execute({
-      callId: ToolCallId('kubernetes-no-session'),
+    const missingSession = await executeTestTool(ctx, {
       name: 'kubernetes_get',
       arguments: { resource: 'pod', name: 'api-1' },
-      signal: new AbortController().signal,
     })
     expect(missingSession.isError).toBe(true)
 

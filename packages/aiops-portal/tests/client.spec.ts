@@ -10,21 +10,21 @@ import { apply, inject } from '../src/client/index.ts'
 describe('AIOps Portal client registration', () => {
   it('contributes localized AIOps conversation and persistent sidebar entries', () => {
     const registrations: Array<{ options: Record<string, unknown>; component: unknown }> = []
-    const settingsScope = {
+    const configForm = () => ({
       getSnapshot: () => ({ status: 'ready', value: { baseUrl: '' }, revision: 0, writable: true, mode: 'host' }),
       subscribe: () => vi.fn(),
       mutate: vi.fn(() => Promise.resolve()),
       set: vi.fn(() => Promise.resolve()),
       unset: vi.fn(() => Promise.resolve()),
-    }
+    })
     const ctx = {
       effect: (setup: () => unknown) => setup(),
       locale: {
         register: vi.fn(() => vi.fn()),
         bind: vi.fn(() => (key: string) => key === 'view.portal' || key === 'entry' ? 'AIOps' : key),
       },
-      settingsScope: {
-        bind: vi.fn(() => settingsScope),
+      configForms: {
+        get: vi.fn(() => configForm()),
       },
       slots: {
         inject: vi.fn((name: string, setup: () => unknown) => {
@@ -40,8 +40,8 @@ describe('AIOps Portal client registration', () => {
 
     apply(ctx as never)
 
-    expect(inject).toEqual(['slots', 'locale', 'settingsScope'])
-    expect(ctx.settingsScope.bind).toHaveBeenCalledTimes(4)
+    expect(inject).toEqual(['slots', 'locale', 'configForms'])
+    expect(ctx.configForms.get).toHaveBeenCalledTimes(4)
     expect(registrations[0]?.options).toMatchObject({
       name: 'conversation.view',
       id: 'aiops',

@@ -10,7 +10,7 @@
 - 阶段 B：独立 `dsh-aiops` workspace、初始八包 bundle 系列，以及本地安装、构建、测试、打包与卸载流程。
 - 阶段 C：新增入口与路由两个包，使 workspace 达到十个包；实现认证 Alertmanager v4 入口、有界载荷标准化、稳定 fingerprint 派生、精确 delivery 重放防护、持久 fingerprint/轮次/Session 映射、高信号 alertname 与 severity 策略、确定性创建/追加/恢复/再触发、并发合并、进程重启后恢复，以及可审计的 `aiops/alert-routed` Session 事件。
 - 阶段 D：`aiops/alert-routed` v2 携带规范 `startsAt` T0 和有界可重放窗口；明确的 Prometheus、Kubernetes Event 与 Pod 日志时间参数；Event 和日志闭区间上界过滤；新增第十一个包，在切换 Workspace 后仍全局注册版本化诊断指令（现暴露为 `aiops-diag`）；场景指南；无模型 key 的告警到报告 Session 重放；以及一次真实只读 CrashLoopBackOff Provider 演练。
-- 阶段 E：新增追加式 `aiops/operator-feedback` 事件和确认、修正、否定工具；按 source/fingerprint 持久分组与冷却；有界可恢复队列；全局及 severity 并发与模型 Token 预留上限；延迟、分组、丢弃、启动、完成和失败审计；以及工作区范围的反馈和路由审计查询。突发、重启恢复、队列饱和、冷却和反馈重放均有确定性测试覆盖。
+- 阶段 E：新增追加式 `plugin:aiops/operator-feedback` 事件和确认、修正、否定工具；按 source/fingerprint 持久分组与冷却；有界可恢复队列；全局及 severity 并发与模型 Token 预留上限；延迟、分组、丢弃、启动、完成和失败审计；以及工作区范围的反馈和路由审计查询。突发、重启恢复、队列饱和、冷却和反馈重放均有确定性测试覆盖。
 - 阶段 F：新增第十二个双面包 `dsh-aiops-portal`；在 DSH Web 注册常驻侧边栏入口和原生 Session `AIOps` 视图；提供持久化且实时生效的 Prometheus 与 Alertmanager 地址设置；用固定同源只读接口汇总 Router 配置工作区；提供事件/活跃/严重/复核概览、结构化搜索与筛选、事件主从详情、人工反馈、路由审计、空白/加载/错误状态、手动及 30 秒刷新和响应式布局。Portal 不新增数据库，也不接受客户端工作区参数。
 - 阶段 F.1：默认 Kubernetes Provider 改用官方原生客户端直接读取 kubeconfig，不再要求主机安装 `kubectl`，同时保留显式兼容子路径。Portal 持久化服务端 kubeconfig 路径/context，并以 API 身份及 Pod、Event、Pod 日志 RBAC 检查作为保存门槛；kubeconfig 内容和凭据不会进入浏览器。
 - 阶段 F.2：路由从 alertname 白名单模式改为通用模式。默认接受所有 alertname，精确噪声排除为可选配置，未知或缺失的 severity label 使用配置的回退值；全局注册的 `aiops-diag` 工作流根据现有标签动态选择 Alertmanager、Prometheus、服务和 Kubernetes 证据分支。

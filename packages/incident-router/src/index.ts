@@ -4,7 +4,6 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { isAbsolute } from 'node:path'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-default-model'
-import type {} from '@deepseek-ai/dsh-agent-presets'
 import type {} from '@deepseek-ai/dsh-aiops-observability'
 import {
   LOCALE_PREFERENCE_FIELD,
@@ -15,7 +14,6 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type {} from '@deepseek-ai/dsh-session-title'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
 import {
   WebhookDeliveryId,
   WebhookRuleId,
@@ -41,7 +39,6 @@ export * from './store.ts'
 export type * from './types.ts'
 
 type IncidentSeverity = 'info' | 'warning' | 'critical'
-export const ROUTING_SETTINGS_NAMESPACE = 'aiops-routing'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
@@ -63,11 +60,7 @@ async function hasPersistedSession(
   sessionId: AcceptedRoute['sessionId'],
   signal: AbortSignal,
 ): Promise<boolean> {
-  const compatible = persistence as typeof persistence & {
-    stat?: (id: AcceptedRoute['sessionId'], options?: { signal?: AbortSignal }) => Promise<unknown | undefined>
-  }
-  if (compatible.stat !== undefined) return await compatible.stat(sessionId, { signal }) !== undefined
-  return (await persistence.listSnapshots(signal)).some(snapshot => snapshot.header.id === sessionId)
+  return await persistence.stat(sessionId, { signal }) !== undefined
 }
 
 /** Router policy and Session composition. */
@@ -164,14 +157,6 @@ const stormControlSchema = z.object({
     warning: budget.required(),
     critical: budget.required(),
   }).required(),
-})
-
-export const RoutingSettingsConfig: z<RoutingSettings> = z.object({
-  version: z.const(1).required(),
-  routingPolicy: routingPolicySchema.required(),
-  severityMap: severityMapSchema.required(),
-  modelBudgets: modelBudgetsSchema.required(),
-  stormControl: stormControlSchema.required(),
 })
 
 export const Config: z<Config> = z.object({
@@ -306,8 +291,9 @@ function hasRouteEvent(agent: Agent, source: string, deliveryId: string, fingerp
 
 /** Read the durable DSH locale preference; English is DSH's Host-side fallback. */
 function outputLocale(ctx: Context): string {
-  const section = ctx.get('settings')?.get(LOCALE_SETTINGS_NAMESPACE) as LocaleSettings | undefined
-  const preference = section?.[LOCALE_PREFERENCE_FIELD]
+  const settings = ctx.get('settings') as { describe?: () => Array<{ ns: string; value: unknown }> } | undefined
+  const section = settings?.describe?.().find(descriptor => descriptor.ns === LOCALE_SETTINGS_NAMESPACE)?.value
+  const preference = (section as LocaleSettings | undefined)?.[LOCALE_PREFERENCE_FIELD]
   return typeof preference === 'string' && preference !== '' ? preference : 'en'
 }
 
@@ -367,7 +353,6 @@ export class AiopsIncidentRouter extends Service {
   static inject = [
     'agents',
     'agentDefaultModel',
-    'agentPresets',
     'aiopsTelemetry',
     'permissionPresets',
     'sessionPersistence',
@@ -381,7 +366,6 @@ export class AiopsIncidentRouter extends Service {
 
   private readonly store: IncidentRouteStore
   private policy: RoutingSettings
-  private readonly policyScope: SettingsScope<RoutingSettings>
   private readonly opening = new Map<string, Promise<Agent>>()
   private readonly active = new Map<string, { severity: 'info' | 'warning' | 'critical'; tokens: number }>()
   private readonly lifecycle = new AbortController()
@@ -396,19 +380,16 @@ export class AiopsIncidentRouter extends Service {
     if ((config.alertnameAllowlist?.length ?? 0) > 0) {
       ctx.logger.warn('incident-router: alertnameAllowlist is deprecated and no longer filters alerts; migrate to routingPolicy.ignoredAlertnames')
     }
-    const basePolicy = settingsFrom(config)
-    this.policyScope = ctx.settings.register(ROUTING_SETTINGS_NAMESPACE, RoutingSettingsConfig, {
-      base: basePolicy,
-      applies: 'live',
-      validate: assertRoutingSettings,
-    })
-    this.policy = this.policyScope.get()
-    this.applyPolicy(this.policy)
-    ctx.effect(() => this.policyScope.watch((next, previous) => {
-      this.store.recordPolicyChange(previous, next, Date.now())
-      this.applyPolicy(next)
-      void this.drainPending().catch(error => this.ctx.logger.warn(error))
-    }), 'aiopsIncidentRouter.routingPolicy()')
+    // DSH 0.2.x serves routing policy through this plugin entry's Config: the
+    // Loader applies a committed settings edit by reloading the entry, so a
+    // live policy change arrives as a restart with the next config. Reconcile
+    // the durable policy audit against the newest committed policy, then adopt
+    // the configured policy for this instance.
+    this.policy = settingsFrom(config)
+    assertRoutingSettings(this.policy)
+    const previousPolicy = this.store.lastRoutingPolicy()
+    if (previousPolicy !== undefined) this.store.recordPolicyChange(previousPolicy, this.policy, Date.now())
+    this.store.saveRoutingPolicyBaseline(this.policy)
     const disposeRule = ctx.webhookRuntime.register({
       id: WebhookRuleId(config.ruleId),
       kind: 'alertmanager',
@@ -718,11 +699,6 @@ export class AiopsIncidentRouter extends Service {
     this.updateTelemetry()
   }
 
-  private applyPolicy(next: RoutingSettings): void {
-    assertRoutingSettings(next)
-    this.policy = structuredClone(next)
-  }
-
   private updateTelemetry(now = Date.now()): void {
     const queue = this.store.queueStats(now)
     this.ctx.aiopsTelemetry.setRouterGauges({
@@ -814,16 +790,11 @@ export class AiopsIncidentRouter extends Service {
   /** Create a fresh diagnostic Agent or resume its persisted Session after restart. */
   private async openAgent(route: AcceptedRoute, alert: AlertmanagerAlert, signal: AbortSignal): Promise<Agent> {
     this.ctx.permissionPresets.resolve(this.config.permissionPreset)
-    const preset = await this.ctx.agentPresets.resolve(this.config.agentPreset)
-    await this.ctx.agentPresets.standingKeyFor(preset.id)
     const workspace = await this.ctx.workspaceRegistry.create(this.config.workspacePath)
     const selection = this.ctx.agentDefaultModel.currentSelection()
     const agentOptions = {
       ...selection,
       maxTokens: this.policy.modelBudgets[route.severity],
-    }
-    const setup = async (agentCtx: Context): Promise<void> => {
-      await this.ctx.agentPresets.mount(agentCtx, preset.id)
     }
     signal.throwIfAborted()
     const persisted = await hasPersistedSession(this.ctx.sessionPersistence, route.sessionId, signal)
@@ -835,9 +806,10 @@ export class AiopsIncidentRouter extends Service {
         handle = await this.ctx.agents.create({
           sessionId: route.sessionId,
           signal,
-          meta: { cwd: workspace.path, agentPreset: preset.id },
+          // DSH 0.2.x resolves and mounts the named agent preset from this
+          // session metadata inside the agent runtime.
+          meta: { cwd: workspace.path, agentPreset: this.config.agentPreset },
           agentOptions,
-          setup,
         })
         created = true
         this.ctx.sessionTitle.rename(
@@ -849,7 +821,6 @@ export class AiopsIncidentRouter extends Service {
           resumeSessionId: route.sessionId,
           signal,
           agentOptions,
-          setup,
         })
         if (handle.agent.session.header.cwd !== workspace.path) {
           throw new Error(`incident router Session ${route.sessionId} belongs to another workspace`)

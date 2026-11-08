@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-aiops-portal",
   "description": "DSH AIOps incident portal with revision-fenced data-source and routing-policy settings",
-  "version": "0.1.2-rc.1",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -43,30 +43,30 @@
   "dependencies": {
     "@deepseek-ai/dsh-aiops-http-read": "workspace:^",
     "@deepseek-ai/dsh-aiops-kubernetes": "workspace:^",
-    "@deepseek-ai/schemastery": "^3.18.2"
+    "@deepseek-ai/schemastery": "^3.19.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis": "^4.1.0",
     "@deepseek-ai/dsh-aiops-incident": "workspace:^",
     "@deepseek-ai/dsh-aiops-incident-router": "workspace:^",
-    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-session-query": "^0.1.2-rc.1"
+    "@deepseek-ai/dsh-credentials": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "^0.2.2-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/cordis": "^4.1.0",
     "@deepseek-ai/dsh-aiops-incident": "workspace:^",
     "@deepseek-ai/dsh-aiops-incident-router": "workspace:^",
-    "@deepseek-ai/dsh-client-locale": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-sidebar": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-session-query": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-conversation": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-sidebar": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-credentials": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query": "^0.2.2-rc.1",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",
     "react": "^18.2.0",

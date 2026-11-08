@@ -77,12 +77,18 @@ export interface AiopsOperatorFeedback {
   readonly origin: 'operator-via-agent'
 }
 
+/**
+ * DSH 0.2.x carries plugin-owned durable state as ignorable plugin records
+ * under the `plugin:` grammar instead of released `SessionEventMap` types, so
+ * an unknown older or newer reader retains and skips them instead of refusing
+ * the whole log.
+ */
 declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    /** Complete post-write AIOps incident state; latest valid event wins on replay. */
-    'aiops/incident-state': AiopsIncidentState
-    /** Append-only operator review of one exact incident-state event. */
-    'aiops/operator-feedback': AiopsOperatorFeedback
+  interface PluginRecordMap {
+    /** Complete post-write AIOps incident state; latest valid record wins on replay. */
+    'plugin:aiops/incident-state': AiopsIncidentState
+    /** Append-only operator review of one exact incident-state record. */
+    'plugin:aiops/operator-feedback': AiopsOperatorFeedback
   }
 }
 

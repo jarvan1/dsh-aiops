@@ -6,7 +6,7 @@
 
 ## 决策
 
-值班人员对诊断的确认、修正或否定写成独立的 `aiops/operator-feedback` Session 事件。事件引用当时报告的 `incidentId` 和 `reportSeq`，不会改写或删除 `aiops/incident-state`。只有当前用户明确表达 verdict 后，Agent 才能调用反馈工具；告警恢复、模型置信度或后续观测都不能被自动解释为反馈。
+值班人员对诊断的确认、修正或否定写成独立的 `plugin:aiops/operator-feedback` Session 事件。事件引用当时报告的 `incidentId` 和 `reportSeq`，不会改写或删除 `plugin:aiops/incident-state`。只有当前用户明确表达 verdict 后，Agent 才能调用反馈工具；告警恢复、模型置信度或后续观测都不能被自动解释为反馈。
 
 Router 在创建 Agent 前把符合策略的告警持久化到 SQLite 队列，并执行以下控制：
 

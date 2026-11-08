@@ -10,7 +10,7 @@ Durable incident state exists inside individual Session logs, but an operator or
 
 ## Decision
 
-The AIOps subsystem reuses the complete `ctx.sessionQuery` capability seam. `dsh-aiops-incident` owns and registers semantic extraction for all stable `aiops/incident-state` fields; `dsh-session-query-sqlite` reconciles those documents from live Sessions and persisted Session revisions into its disposable FTS5 index; `dsh-tool-aiops-history` is the incident-focused Consumer.
+The AIOps subsystem reuses the complete `ctx.sessionQuery` capability seam. `dsh-aiops-incident` owns and registers semantic extraction for all stable `plugin:aiops/incident-state` fields; `dsh-session-query-sqlite` reconciles those documents from live Sessions and persisted Session revisions into its disposable FTS5 index; `dsh-tool-aiops-history` is the incident-focused Consumer.
 
 The Consumer exposes `aiops_incident_list`, `aiops_incident_get`, and `aiops_incident_search`. It derives authorization from the owning Agent Session and limits every cross-Session operation to exact `cwd` equality. A Session without `cwd` can read only itself. Exact reads use the cited Session id and sequence to reload and decode the authoritative append-only event; index content never substitutes for incident state.
 

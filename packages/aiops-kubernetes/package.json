@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-aiops-kubernetes",
   "description": "Read-only native Kubernetes API capability for DSH AIOps, with an optional kubectl provider",
-  "version": "0.1.2-rc.1",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -25,14 +25,14 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/schemastery": "^3.19.0",
     "@kubernetes/client-node": "2.0.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-subprocess": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-util-values": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-settings": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-subprocess": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-util-values": "^0.2.2-rc.1"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/dsh-subprocess": {
@@ -40,9 +40,9 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-subprocess": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-util-values": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-settings": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-subprocess": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-util-values": "^0.2.2-rc.1"
   }
 }

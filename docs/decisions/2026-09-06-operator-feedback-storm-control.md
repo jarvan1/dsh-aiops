@@ -6,7 +6,7 @@ Status: accepted
 
 ## Decision
 
-An operator confirmation, correction, or rejection is a separate `aiops/operator-feedback` Session event. It cites the reviewed report's `incidentId` and `reportSeq` without rewriting or deleting `aiops/incident-state`. The Agent may invoke the feedback tool only after an explicit verdict from the current user; alert resolution, model confidence, and later observations are never inferred as feedback.
+An operator confirmation, correction, or rejection is a separate `plugin:aiops/operator-feedback` Session event. It cites the reviewed report's `incidentId` and `reportSeq` without rewriting or deleting `plugin:aiops/incident-state`. The Agent may invoke the feedback tool only after an explicit verdict from the current user; alert resolution, model confidence, and later observations are never inferred as feedback.
 
 Before creating an Agent, the router persists each policy-eligible alert in SQLite and applies these controls:
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { appendPluginRecord, Session, SessionId } from '@deepseek-ai/dsh-session'
 import {
   aiopsFeedbackProjectionDefinition,
   aiopsFeedbackProjectionSchema,
@@ -69,7 +69,7 @@ describe('AIOps incident domain', () => {
     const session = Session.create(SessionId('incident-projection'))
     const initial = aiopsIncidentProjectionDefinition.init()
     const first = decodeAiopsIncidentState(base)
-    session.append('aiops/incident-state', first)
+    appendPluginRecord(session, 'plugin:aiops/incident-state', first)
     const firstEvent = session.snapshotEvents()[0]
     if (firstEvent === undefined) throw new Error('missing incident event')
     const current = aiopsIncidentProjectionDefinition.apply(initial, firstEvent)
@@ -106,8 +106,8 @@ describe('AIOps incident domain', () => {
       correction: 'The rollout, not saturation, caused the failure.',
     })
     const session = Session.create(SessionId('feedback-projection'))
-    session.append('aiops/operator-feedback', confirmed)
-    session.append('aiops/operator-feedback', corrected)
+    appendPluginRecord(session, 'plugin:aiops/operator-feedback', confirmed)
+    appendPluginRecord(session, 'plugin:aiops/operator-feedback', corrected)
     let state = aiopsFeedbackProjectionDefinition.init()
     for (const event of session.snapshotEvents()) state = aiopsFeedbackProjectionDefinition.apply(state, event)
     expect(state).toEqual(corrected)

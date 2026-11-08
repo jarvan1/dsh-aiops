@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-aiops-skill-k8s-diag",
   "description": "Packaged time-anchored Kubernetes diagnosis skill for DSH AIOps",
-  "version": "0.1.2-rc.1",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -22,11 +22,11 @@
   ],
   "license": "MIT",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-skill": "^0.2.2-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1"
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-skill": "^0.2.2-rc.1"
   }
 }

@@ -114,13 +114,8 @@ export class AlertmanagerHttpRuntime extends AlertmanagerRuntime {
     resolveConfig(config)
     this.source = () => config
     this.fetchImpl = fetchImpl
-    ctx.inject(['settings'], (settingsCtx) => {
-      settingsCtx.settings.installSection(ctx, 'aiops-alertmanager', AlertmanagerHttpRuntime.Config, config, {
-        validate: resolveConfig,
-        setSource: (current) => { this.source = current },
-        onChange: () => {},
-      })
-    })
+    // DSH 0.2.x projects this plugin entry's `static Config` into the settings
+    // UI directly; a committed settings edit reloads the entry with new config.
   }
 
   override resolveAlerts(request: AlertmanagerAlertsRequest): AlertmanagerAlertsSpec {

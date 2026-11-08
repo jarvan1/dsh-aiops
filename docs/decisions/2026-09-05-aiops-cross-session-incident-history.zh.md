@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-AIOps 子系统复用完整的 `ctx.sessionQuery` 能力 seam。`dsh-aiops-incident` 拥有并注册所有稳定 `aiops/incident-state` 字段的语义提取；`dsh-session-query-sqlite` 把这些文档从实时 Session 与持久 Session revision 协调到可丢弃的 FTS5 索引；`dsh-tool-aiops-history` 是事件专用 Consumer。
+AIOps 子系统复用完整的 `ctx.sessionQuery` 能力 seam。`dsh-aiops-incident` 拥有并注册所有稳定 `plugin:aiops/incident-state` 字段的语义提取；`dsh-session-query-sqlite` 把这些文档从实时 Session 与持久 Session revision 协调到可丢弃的 FTS5 索引；`dsh-tool-aiops-history` 是事件专用 Consumer。
 
 该 Consumer 暴露 `aiops_incident_list`、`aiops_incident_get` 与 `aiops_incident_search`。它从所属 Agent Session 派生授权，并把每项跨 Session 操作限制为 `cwd` 完全相等。没有 `cwd` 的 Session 只能读取自身。精确读取使用引用的 Session id 与序号重新加载并解码权威仅追加事件；索引内容绝不替代事件状态。
 

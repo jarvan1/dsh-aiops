@@ -4,6 +4,7 @@ import {
   decodeAiopsOperatorFeedback,
 } from '@deepseek-ai/dsh-aiops-incident'
 import type { RouteAuditOutcome, RouteAuditRecord } from '@deepseek-ai/dsh-aiops-incident-router'
+import { pluginRecordOf } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-query'
 import type { PortalIncident, PortalSnapshot, PortalSummary } from './types.ts'
 
@@ -49,22 +50,29 @@ export async function readPortalSnapshot(
   }
 
   const incidents: PortalIncident[] = []
+  // DSH 0.2.x carries durable incident state as ignorable plugin records; the
+  // query seam indexes them but its released types predate the grammar, so
+  // hits compare by record-type string and windows decode via pluginRecordOf.
+  const INCIDENT_RECORD_TYPE = 'plugin:aiops/incident-state'
+  const FEEDBACK_RECORD_TYPE = 'plugin:aiops/operator-feedback'
   for (const session of sessions.slice(0, limits.maxScanSessions)) {
     signal?.throwIfAborted()
     const events = await ctx.sessionQuery.listEvents(session.header.id)
-    const reportHits = events.filter(event => event.type === 'aiops/incident-state')
-    const feedbackHits = events.filter(event => event.type === 'aiops/operator-feedback')
+    const reportHits = events.filter(event => event.type === (INCIDENT_RECORD_TYPE as typeof event.type))
+    const feedbackHits = events.filter(event => event.type === (FEEDBACK_RECORD_TYPE as typeof event.type))
     const reportHit = reportHits.at(-1)
     if (reportHit === undefined) continue
     const reportWindow = await ctx.sessionQuery.readEvent({ sessionId: session.header.id, seq: reportHit.seq }, signal)
-    if (reportWindow.target.type !== 'aiops/incident-state') continue
-    const incident = decodeAiopsIncidentState(reportWindow.target.data)
+    const reportRecord = pluginRecordOf(reportWindow.target)
+    if (reportRecord === undefined || reportRecord.type !== INCIDENT_RECORD_TYPE) continue
+    const incident = decodeAiopsIncidentState(reportRecord.data)
     const feedbackHit = feedbackHits.at(-1)
     let feedback: PortalIncident['feedback']
     if (feedbackHit !== undefined) {
       const feedbackWindow = await ctx.sessionQuery.readEvent({ sessionId: session.header.id, seq: feedbackHit.seq }, signal)
-      if (feedbackWindow.target.type === 'aiops/operator-feedback') {
-        const decoded = decodeAiopsOperatorFeedback(feedbackWindow.target.data)
+      const feedbackRecord = pluginRecordOf(feedbackWindow.target)
+      if (feedbackRecord !== undefined && feedbackRecord.type === FEEDBACK_RECORD_TYPE) {
+        const decoded = decodeAiopsOperatorFeedback(feedbackRecord.data)
         if (decoded.incidentId === incident.incidentId && decoded.reportSeq === reportHit.seq) {
           feedback = { seq: feedbackHit.seq, time: feedbackHit.time, feedback: decoded }
         }

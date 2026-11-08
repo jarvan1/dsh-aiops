@@ -8,15 +8,18 @@ import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
-import SessionStore, { SessionId, type Session } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { executeTestTool } from '../../../tests/helpers/tool-executor.ts'
+import SessionStore, { appendPluginRecord, SessionId, type Session } from '@deepseek-ai/dsh-session'
+// DSH 0.2.x: this plugin no longer has a default export; the Loader resolves it
+// from its named `name`/`apply` exports, so import the namespace.
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SqliteSessionQuery from '@deepseek-ai/dsh-session-query-sqlite'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as Incident from '../../aiops-incident/src/index.ts'
 import * as HistoryTools from '../src/index.ts'
+import { installTestToolExecutor } from '../../../tests/helpers/tool-executor.ts'
 
 let root: string | undefined
 let context: Context | undefined
@@ -131,9 +134,10 @@ describe('AIOps incident history through a real Loader composition', () => {
     } as unknown as NonNullable<typeof ctx.loader.internal>
     await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
     await ctx.loader.await()
+    installTestToolExecutor(ctx)
 
     const caller = ctx.sessions.create(SessionId('caller'), { meta: { createdAt: 1, cwd: '/work' } })
-    caller.append('aiops/incident-state', incident('inc-caller', 'Checkout'))
+    appendPluginRecord(caller, 'plugin:aiops/incident-state', incident('inc-caller', 'Checkout'))
     const prior = ctx.sessions.create(SessionId('prior'), { meta: { createdAt: 2, cwd: '/work' } })
     prior.append('user/message', {
       id: 'ordinary-message' as never,
@@ -141,8 +145,8 @@ describe('AIOps incident history through a real Loader composition', () => {
       source: { kind: 'user' },
       content: [{ type: 'text', text: 'not an incident' }],
     }, { surfaceOp: 'append' })
-    prior.append('aiops/incident-state', incident('inc-prior', 'Payments'))
-    prior.append('aiops/operator-feedback', {
+    appendPluginRecord(prior, 'plugin:aiops/incident-state', incident('inc-prior', 'Payments'))
+    appendPluginRecord(prior, 'plugin:aiops/operator-feedback', {
       version: 1,
       feedbackId: `feedback-${'a'.repeat(32)}` as never,
       incidentId: 'inc-prior' as never,
@@ -152,14 +156,11 @@ describe('AIOps incident history through a real Loader composition', () => {
       origin: 'operator-via-agent',
     })
     const hidden = ctx.sessions.create(SessionId('hidden'), { meta: { createdAt: 3, cwd: '/secret' } })
-    hidden.append('aiops/incident-state', incident('inc-hidden', 'Secret'))
+    appendPluginRecord(hidden, 'plugin:aiops/incident-state', incident('inc-hidden', 'Secret'))
 
-    let call = 0
-    const execute = (name: string, args: unknown, agent: Agent | null = fakeAgent(caller)) => ctx.tools.execute({
+    const execute = (name: string, args: unknown, agent: Agent | null = fakeAgent(caller)) => executeTestTool(ctx, {
       name,
       arguments: args,
-      callId: ToolCallId(`aiops-history-${++call}`),
-      signal: new AbortController().signal,
       ...(agent === null ? {} : { agent }),
     })
 
@@ -227,7 +228,7 @@ describe('AIOps incident history through a real Loader composition', () => {
     expect((await execute('aiops_incident_get', { session_id: 'prior', seq: 1 })).isError).toBe(true)
     ctx.sessionQuery.readEvent = originalReadEvent
 
-    caller.append('aiops/incident-state', incident('inc-caller', 'Checkout update'))
+    appendPluginRecord(caller, 'plugin:aiops/incident-state', incident('inc-caller', 'Checkout update'))
     const originalFilterSessions = ctx.sessionQuery.filterSessions.bind(ctx.sessionQuery)
     const originalListEvents = ctx.sessionQuery.listEvents.bind(ctx.sessionQuery)
     ctx.sessionQuery.filterSessions = () => Promise.resolve([
@@ -236,10 +237,10 @@ describe('AIOps incident history through a real Loader composition', () => {
     ])
     ctx.sessionQuery.listEvents = sessionId => Promise.resolve(sessionId === caller.id
       ? [
-        { sessionId: caller.id, seq: 0 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only' },
-        { sessionId: caller.id, seq: 1 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only' },
+        { sessionId: caller.id, seq: 0 as never, time: 5, type: 'plugin:aiops/incident-state', surface: 'log-only' },
+        { sessionId: caller.id, seq: 1 as never, time: 5, type: 'plugin:aiops/incident-state', surface: 'log-only' },
       ]
-      : [{ sessionId: prior.id, seq: 1 as never, time: 5, type: 'aiops/incident-state', surface: 'log-only' }])
+      : [{ sessionId: prior.id, seq: 1 as never, time: 5, type: 'plugin:aiops/incident-state', surface: 'log-only' }])
     const tied = await execute('aiops_incident_list', { limit: 3 })
     expect(tied.isError).toBe(false)
     if (tied.isError) throw tied.error
@@ -250,7 +251,7 @@ describe('AIOps incident history through a real Loader composition', () => {
     ctx.sessionQuery.listEvents = originalListEvents
 
     const isolated = ctx.sessions.create(SessionId('isolated'), { meta: { createdAt: 4 } })
-    isolated.append('aiops/incident-state', incident('inc-isolated', 'Isolated'))
+    appendPluginRecord(isolated, 'plugin:aiops/incident-state', incident('inc-isolated', 'Isolated'))
     const isolatedList = await execute('aiops_incident_list', {}, fakeAgent(isolated))
     expect(isolatedList.isError).toBe(false)
     if (isolatedList.isError) throw isolatedList.error

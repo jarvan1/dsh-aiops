@@ -7,13 +7,15 @@ import { Context } from '@deepseek-ai/cordis'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-import JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
+// DSH 0.2.x: this plugin no longer has a default export; the Loader resolves it
+// from its named `name`/`apply` exports, so import the namespace.
+import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as Incident from '../src/index.ts'
+import { executeTestTool, installTestToolExecutor } from '../../../tests/helpers/tool-executor.ts'
 
 let root: string | undefined
 let context: Context | undefined
@@ -64,14 +66,10 @@ describe('AIOps incident through a real Loader composition', () => {
     } as unknown as NonNullable<typeof ctx.loader.internal>
     await ctx.loader.create({ name: 'cordis:include', config: { path: pathToFileURL(configPath).href } })
     await ctx.loader.await()
+    installTestToolExecutor(ctx)
 
     const session = ctx.sessions.create(SessionId('aiops-incident-loader'), { meta: { cwd: root } })
-    const modernPersistence = 'stat' in ctx.sessionPersistence
-    const writeHandle = modernPersistence
-      ? await (ctx.sessionPersistence.create as unknown as (
-          header: typeof session.header,
-        ) => Promise<{ close(): Promise<void>, read(): Promise<readonly unknown[]> }>)(session.header)
-      : undefined
+    const writeHandle = await ctx.sessionPersistence.create(session.header)
     const report = {
       version: 1,
       incidentId: 'inc-payments-1',
@@ -82,80 +80,64 @@ describe('AIOps incident through a real Loader composition', () => {
       hypotheses: [{ summary: 'API saturation', confidence: 'possible', evidenceIds: ['metric-p99'] }],
       recommendations: [{ action: 'Review pod saturation before scaling.', risk: 'low' }],
     }
-    const result = await ctx.tools.execute({
-      callId: ToolCallId('incident-report'),
+    const result = await executeTestTool(ctx, {
       name: 'aiops_incident_report',
       arguments: { incident: report },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(result.isError).toBe(false)
     expect(ctx.sessionProjections.stateOf(session, 'aiopsIncident')).toEqual(report)
 
     const feedbackCall = {
-      callId: ToolCallId('incident-feedback'),
       name: 'aiops_incident_feedback',
+      callId: 'incident-feedback',
       arguments: { verdict: 'corrected', note: 'The operator found a rollout correlation.', correction: 'A bad rollout caused the latency.' },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     }
-    const feedback = await ctx.tools.execute(feedbackCall)
+    const feedback = await executeTestTool(ctx, feedbackCall)
     expect(feedback.isError).toBe(false)
     expect(ctx.sessionProjections.stateOf(session, 'aiopsIncidentFeedback')).toMatchObject({
       incidentId: 'inc-payments-1', verdict: 'corrected', reportSeq: 0,
     })
-    const replayedFeedback = await ctx.tools.execute(feedbackCall)
+    const replayedFeedback = await executeTestTool(ctx, feedbackCall)
     expect(replayedFeedback.isError).toBe(false)
 
-    let durable: readonly unknown[]
-    if (writeHandle !== undefined) {
-      await writeHandle.close()
-      const readHandle = await (ctx.sessionPersistence as unknown as {
-        open(id: typeof session.id, mode: 'read'): Promise<{ close(): Promise<void>, read(): Promise<readonly unknown[]> }>
-      }).open(session.id, 'read')
-      durable = await readHandle.read()
-      await readHandle.close()
-    } else {
-      durable = (await ctx.sessionPersistence.inspect(session.id)).events
-    }
+    await writeHandle.close()
+    const readHandle = await ctx.sessionPersistence.open(session.id, 'read')
+    const durable = (await readHandle.read()).events
+    await readHandle.close()
     expect(durable).toHaveLength(2)
     expect(durable[0]).toMatchObject({
-      type: 'aiops/incident-state',
+      type: 'plugin:aiops/incident-state',
       data: report,
-      ...(modernPersistence ? { ignorable: true } : {}),
+      ignorable: true,
     })
     expect(durable[1]).toMatchObject({
-      type: 'aiops/operator-feedback',
+      type: 'plugin:aiops/operator-feedback',
       data: { verdict: 'corrected' },
-      ...(modernPersistence ? { ignorable: true } : {}),
+      ignorable: true,
     })
 
     expect(ctx.tools.get('aiops_incident_report')?.presentCall?.({ incident: report })).toEqual({
       card: 'generic', title: 'Record AIOps incident', kind: 'other', rawInput: report,
     })
-    const withoutAgent = await ctx.tools.execute({
-      callId: ToolCallId('incident-without-agent'),
+    const withoutAgent = await executeTestTool(ctx, {
       name: 'aiops_incident_report',
       arguments: { incident: report },
-      signal: new AbortController().signal,
     })
     expect(withoutAgent.isError).toBe(true)
-    const invalidFeedback = await ctx.tools.execute({
-      callId: ToolCallId('invalid-feedback'),
+    const invalidFeedback = await executeTestTool(ctx, {
       name: 'aiops_incident_feedback',
       arguments: { verdict: 'corrected', note: 'Missing correction.' },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     expect(invalidFeedback.isError).toBe(true)
 
     const originalFlush = ctx.sessions.flush.bind(ctx.sessions)
     ctx.sessions.flush = () => Promise.resolve(false)
-    const uncertain = await ctx.tools.execute({
-      callId: ToolCallId('incident-no-flush-listener'),
+    const uncertain = await executeTestTool(ctx, {
       name: 'aiops_incident_report',
       arguments: { incident: report },
-      signal: new AbortController().signal,
       agent: { session } as unknown as Agent,
     })
     ctx.sessions.flush = originalFlush

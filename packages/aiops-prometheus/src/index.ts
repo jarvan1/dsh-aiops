@@ -147,13 +147,8 @@ export class PrometheusHttpRuntime extends PrometheusRuntime {
     resolveConfig(config)
     this.source = () => config
     this.fetchImpl = fetchImpl
-    ctx.inject(['settings'], (settingsCtx) => {
-      settingsCtx.settings.installSection(ctx, 'aiops-prometheus', PrometheusHttpRuntime.Config, config, {
-        validate: resolveConfig,
-        setSource: (current) => { this.source = current },
-        onChange: () => {},
-      })
-    })
+    // DSH 0.2.x projects this plugin entry's `static Config` into the settings
+    // UI directly; a committed settings edit reloads the entry with new config.
   }
 
   override query(request: PrometheusInstantQuery, signal?: AbortSignal): Promise<PrometheusQueryResult> {

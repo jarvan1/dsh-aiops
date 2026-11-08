@@ -10,7 +10,7 @@ The current source bundle is built and tested against:
 
 | Component | Supported version |
 | --- | --- |
-| DSH | `@deepseek-ai/dsh@0.1.2-rc.1` |
+| DSH | `@deepseek-ai/dsh@0.2.2-rc.1` |
 | Node.js | `^22.19.0` or `>=24.0.0` |
 | pnpm | `11.7.0` (`>=10` Git prepare-script approval semantics are required) |
 
@@ -23,7 +23,7 @@ dsh plugin --profile web add github:jarvan1/dsh-aiops
 Without a global DSH command, use the matching CLI version:
 
 ```sh
-npx -y @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add github:jarvan1/dsh-aiops
+npx -y @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add github:jarvan1/dsh-aiops
 ```
 
 pnpm 10 and later will initially block the Git dependency's `prepare` script. The failed command prints an `allowBuilds` entry containing the resolved repository and commit. Copy that **exact key** into `<DSH_HOME>/profiles/web/pnpm-workspace.yaml` (normally `~/.dsh/profiles/web/pnpm-workspace.yaml`) and run the add command again. Its shape is:
