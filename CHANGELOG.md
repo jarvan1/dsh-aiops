@@ -4,6 +4,33 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-08 — Diagnosis IM delivery (aiops-delivery)
+
+### Added
+
+- Added `@deepseek-ai/dsh-aiops-delivery`, which subscribes to the `aiopsIncident` projection change feed and pushes each qualifying diagnosis to one IM incoming webhook: Feishu interactive cards, DingTalk markdown, or Slack incoming-webhook text, all bounded by title/fact clamps.
+- Added durable, append-only `plugin:aiops/delivery` marker records (`delivered` | `failed` with a bounded reason) written into the diagnostic Session, so restarts and replays never double-push and later report updates retry after a failed attempt burst.
+- Added a severity gate (`minSeverity`, default `warning`): below-threshold reports are skipped until severity escalates, and one warning per session is logged when the webhook credential is missing or the URL is not a clean https URL.
+- Added Loader entries (source and bundle patches) plus settings-UI projection for `provider`, `webhookUrlEnv` (credential reference; the webhook URL never enters the patch or settings store), `minSeverity`, `portalBaseUrl` deep link, `timeoutMs`, `maxAttempts`, `retryBackoffMs`, and `maxResponseBytes`.
+- Documented delivery deployment and IM webhook token rotation (per-delivery credential re-resolution, no restart needed) in the bilingual deployment guide and the AIOps architecture guide.
+
+### Validation
+
+- Full TypeScript and Portal builds pass, including the new package; GitHub source-package preparation passes.
+- 25 test files and 172 tests pass; one opt-in real-cluster test remains skipped in the default suite. The delivery suite covers provider payload shapes, severity gating and escalation, delivered/failed markers, idempotent re-push suppression, provider response validation (Feishu `code`, DingTalk `errcode`, Slack `ok`), timeout, missing/invalid webhook URLs, and configuration validation.
+
+## Unreleased — 2026-11-08 — DSH 0.2.2-rc.1 upgrade (0.2.0-rc.1)
+
+### Changed
+
+- Upgraded every `@deepseek-ai/dsh-*` dependency from `^0.1.2-rc.1` to `^0.2.2-rc.1`, with Cordis `^4.1.0`, Schemastery `^3.19.0`, and `cordis-plugin-include`/`loader` `^1.1.0`; removed the deleted `@deepseek-ai/dsh-agent-presets` package.
+- Migrated settings from the 0.1.x `SettingsProvider`/`settingsScope` model to the 0.2.x `SettingsForms`/`ConfigForm` model. Each Loader entry (`aiops-alertmanager`, `aiops-prometheus`, `aiops-kubernetes`, `aiops-incident-router`) now projects its static `Config` into the settings UI, and a committed settings edit reloads the entry with new config instead of applying live in-process.
+- Routed agent creation through the 0.2.x named-preset mechanism (`agents.create({ meta: { agentPreset } })`) instead of mounting preset factories from the removed `agentPresets` service.
+- Made routing-policy changes restart-applied: the incident router reconciles the durable policy audit against the newest committed policy at construction and records an audit entry when the reloaded entry config differs from the persisted baseline (store schema v3 → v4, adding a `store_meta` routing-policy baseline).
+- Carried incident state as DSH 0.2.x ignorable plugin records: event types `aiops/incident-state` and `aiops/operator-feedback` are now `plugin:aiops/incident-state` and `plugin:aiops/operator-feedback`, written via `appendPluginRecord` and read via `pluginRecordOf`, so an unknown reader retains and skips them instead of refusing the whole Session log. Sessions persisted under 0.1.x with the old non-ignorable types refuse to load under 0.2.x readers and must be started fresh.
+- Adopted the 0.2.x session APIs: `SessionPersistence.listSnapshots` → `list`, projection registration now returns typed handles (per-handle `stateOf` instead of the deprecated registry-level read).
+- Adapted Loader-composition tests to the 0.2.x tool model: `ctx.tools.execute` is batch-only and requires a deployment-level `ToolExecutor` (test compositions install a minimal pass-through executor through `tools.setExecutor`), and `@deepseek-ai/dsh-session-persistence-jsonl` no longer ships a default export.
+
 ## Unreleased — 2026-09-08
 
 ### Added

@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-aiops",
   "description": "Installable DSH bundle for storm-controlled read-only diagnosis, feedback, and history",
-  "version": "0.1.2-rc.1",
+  "version": "0.2.0-rc.1",
   "publishConfig": {
     "access": "public"
   },
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@deepseek-ai/dsh-aiops-alertmanager": "workspace:^",
+    "@deepseek-ai/dsh-aiops-delivery": "workspace:^",
     "@deepseek-ai/dsh-aiops-incident": "workspace:^",
     "@deepseek-ai/dsh-aiops-incident-router": "workspace:^",
     "@deepseek-ai/dsh-aiops-kubernetes": "workspace:^",
@@ -36,18 +37,18 @@
     "@deepseek-ai/dsh-aiops-portal": "workspace:^",
     "@deepseek-ai/dsh-aiops-prometheus": "workspace:^",
     "@deepseek-ai/dsh-aiops-skill-k8s-diag": "workspace:^",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-session-query-sqlite": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-skill": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-session-query-sqlite": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-skill": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-tool-aiops-history": "workspace:^",
     "@deepseek-ai/dsh-tool-aiops-observe": "workspace:^",
-    "@deepseek-ai/dsh-webhook": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-webhook": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-webhook-alertmanager": "workspace:^"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.1.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": "^4.1.0"
   }
 }

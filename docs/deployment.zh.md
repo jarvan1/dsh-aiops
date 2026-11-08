@@ -26,6 +26,47 @@ Portal 永不返回 webhook bearer 明文，只返回公开 receiver URL 和“�
 
 本版本刻意不提供 Portal secret 显示或写入接口，因此不存在需要授权、审计或 CSRF 防护的明文 reveal 事件。
 
+## 诊断结论推送
+
+`aiops-delivery` 把完成的诊断推送到一个 IM incoming webhook（飞书、钉钉或 Slack）。https webhook URL 作为 `AIOPS_DELIVERY_WEBHOOK_URL` credential reference 的值，保存在权限为 `0600` 的 `<DSH_HOME>/.credentials.yaml` 或外部 secret manager，不能进入 patch、设置存储或仓库。Provider（`provider`）、严重级别闸门（`minSeverity`）、Portal 深链（`portalBaseUrl`）以及有界的超时/重试上限都是 entry 设置，由 Web 设置界面投影；提交编辑会重载该 entry。凭证值在每次投递时重新解析，因此轮换 IM webhook token 无需重启：更新引用值并发送一次 canary 事件即可。
+
+验证方式：路由一次 canary 告警，确认消息出现在目标 IM 会话，且 Session 日志中出现一条 outcome 为 `delivered` 的 `plugin:aiops/delivery` 记录。
+
+## 本地开发运行
+
+在一次性 DSH Web profile 中先跑通，再接触共享环境：
+
+```sh
+pnpm install
+pnpm run build:github
+
+# 从本地 checkout 安装进隔离的 profile home。
+DSH_HOME=~/.dsh-aiops-dev \
+  npx -y @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add link:"$PWD/packages/aiops"
+```
+
+link 安装加载的是构建后的 `lib/` 产物，因此每次改代码后都要重新 build 并重启 DSH。若 pnpm 拦截 Git 依赖的 `prepare` 脚本，把打印的精确 `allowBuilds` key 复制进 profile 的 `pnpm-workspace.yaml` 后重跑 add 命令。
+
+在 `<DSH_HOME>/.credentials.yaml`（权限 `0600`）中放置凭证：
+
+```yaml
+AIOPS_ALERTMANAGER_WEBHOOK_SECRET: '<长随机串>'   # webhook 接收端 Bearer
+AIOPS_DELIVERY_WEBHOOK_URL: 'https://open.feishu.cn/open-apis/bot/v2/hook/<token>'  # IM 机器人 URL
+```
+
+飞书自定义机器人在群设置 → 群机器人 → 自定义机器人中创建并复制 webhook URL；钉钉与 Slack 机器人的 URL 形状相同。`provider`、`minSeverity`、`portalBaseUrl` 在 AIOps 设置界面中配置（提交编辑会重载 entry）；可选设置 `AIOPS_PORTAL_PUBLIC_URL`，让推送卡片带可用的 Portal 按钮。
+
+启动 Web profile，检查 `/api/aiops/healthz`、`/api/aiops/readyz` 并打开侧边栏 AIOps Portal。webhook 接收端默认监听 `127.0.0.1:3081/alertmanager`；canary 不需要真实 Alertmanager：
+
+```sh
+curl -s -X POST http://127.0.0.1:3081/alertmanager \
+  -H "Authorization: Bearer $AIOPS_ALERTMANAGER_WEBHOOK_SECRET" \
+  -H 'Content-Type: application/json' \
+  -d '{"version":"4","alerts":[{"status":"firing","startsAt":"2026-11-08T10:00:00Z","labels":{"alertname":"HighLatency","severity":"critical","service":"checkout"},"annotations":{"description":"p99 latency above 4s"}}]}'
+```
+
+canary 会走完整链路：认证 ingress → 路由轮次 → 确定性诊断 Session（profile 内需已配置模型）→ `aiops_incident_report` → 推送 → IM 会话消息加一条 `plugin:aiops/delivery` `delivered` 记录。诊断质量依赖 Prometheus/Alertmanager/Kubernetes 连通性，但 delivery 冒烟只需要模型产出事件报告。切换 provider 直接在设置中改 `provider`；轮换 IM webhook token 只需更新凭证值——投递每次尝试都重新解析，无需重启。
+
 ## 升级与配置迁移
 
 升级前备份 DSH settings 文档、Session workspace、`aiops-router.sqlite` 与凭据文件。Router schema 会接受 F.2 之前的 `alertnameAllowlist`，使旧 profile 能启动并输出弃用警告，同时采用安全的通用默认值：忽略 `Watchdog` 和 `InfoInhibitor`，缺失/未知 severity 映射为 `warning`。启动后应立即把旧字段替换为显式 `routingPolicy`；旧 allowlist 不会被错误解释为排除列表。
@@ -47,4 +88,4 @@ pnpm --filter @deepseek-ai/dsh-aiops pack
 
 先在一次性 DSH profile 安装 bundle、检查 `config dump`、用一次性凭据启动、验证健康/就绪/指标和 canary webhook，再执行卸载。升级时使用旧 profile 副本重复验证 Session 历史、队列恢复、设置和 Portal。卸载只移除插件注册，不会静默删除 DSH home、Session JSONL、SQLite、settings 或凭据；这些数据必须按部署保留策略显式归档或删除。
 
-支持的运行时为 Node `^22.19.0 || >=24.0.0`、pnpm `11.7.0`、Cordis `^4.0.2` 和 DSH `0.1.2-rc.1` 包 API。DSH 包版本变化必须重新执行一次性 profile 升级矩阵。
+支持的运行时为 Node `^22.19.0 || >=24.0.0`、pnpm `11.7.0`、Cordis `^4.1.0` 和 DSH `0.2.2-rc.1` 包 API。DSH 包版本变化必须重新执行一次性 profile 升级矩阵。

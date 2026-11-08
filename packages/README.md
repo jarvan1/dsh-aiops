@@ -22,7 +22,7 @@ The `aiops/` group accepts authenticated Alertmanager notifications; routes stab
 <a id="packages"></a>
 ## Packages
 
-Thirteen packages cover ingress, routing, acquisition, model interaction, a packaged diagnostic skill, durable state, history reads, product telemetry, the Portal, and composition.
+Thirteen packages cover ingress, routing, acquisition, model interaction, a packaged diagnostic skill, durable state, history reads, IM delivery, product telemetry, the Portal, and composition.
 
 | Package | Role | ctx key or contribution |
 |---|---|---|
@@ -31,7 +31,8 @@ Thirteen packages cover ingress, routing, acquisition, model interaction, a pack
 | [`aiops-prometheus/`](aiops-prometheus/README.md) | Read-only PromQL, rule, target, and metadata Service Definition and HTTP Provider | `ctx.prometheus` |
 | [`aiops-kubernetes/`](aiops-kubernetes/README.md) | Read-only native Kubernetes API Provider with optional kubectl compatibility | `ctx.kubernetes` |
 | [`tool-aiops-observe/`](tool-aiops-observe/README.md) | Ten model-facing observation tools | `ctx.tools` |
-| [`aiops-incident/`](aiops-incident/README.md) | Complete reports, append-only feedback, projections, and write tools | `aiops/incident-state`, `aiops/operator-feedback` |
+| [`aiops-incident/`](aiops-incident/README.md) | Complete reports, append-only feedback, projections, and write tools | `plugin:aiops/incident-state`, `plugin:aiops/operator-feedback` |
+| [`aiops-delivery/`](aiops-delivery/README.md) | Pushes completed diagnoses to Feishu, DingTalk, or Slack incoming webhooks with durable markers | `plugin:aiops/delivery` on the `aiopsIncident` change feed |
 | [`tool-aiops-history/`](tool-aiops-history/README.md) | Workspace-scoped report, feedback, and routing-audit tools | `ctx.tools` over `ctx.sessionQuery` and router |
 | [`aiops-portal/`](aiops-portal/README.md) | Read-only incidents plus revision-fenced data-source/routing settings and dry-run | `conversation.view`, `/api/aiops/portal` |
 | [`aiops-observability/`](aiops-observability/README.md) | Low-cardinality liveness, readiness, and Prometheus telemetry | `ctx.aiopsTelemetry`, `/api/aiops/{healthz,readyz,metrics}` |

@@ -2,7 +2,7 @@
 
 [English](aiops.md) | 中文
 
-DSH AIOps 子系统是 Alertmanager 驱动的只读调查、人工反馈与历史闭环，覆盖当前告警、Prometheus 指标、Kubernetes 对象与 Event、有界 Pod 日志以及持久事件记录。它添加认证 webhook 入口、带风暴控制的持久 fingerprint 路由、一个随包诊断 skill、三个可替换的观测 capability、十四个模型工具、持久路由/事件/反馈，以及 DSH Web 内的专用 Portal，且不修改 `agent-loop`。Session 日志仍是诊断真源；SQLite 分别保存路由协调/审计和可重建的跨 Session 搜索索引，RAG 仍不在本版本范围内。
+DSH AIOps 子系统是 Alertmanager 驱动的只读调查、人工反馈与历史闭环，覆盖当前告警、Prometheus 指标、Kubernetes 对象与 Event、有界 Pod 日志以及持久事件记录。它添加认证 webhook 入口、带风暴控制的持久 fingerprint 路由、一个随包诊断 skill、三个可替换的观测 capability、十四个模型工具、持久路由/事件/反馈、诊断结论 IM 推送，以及 DSH Web 内的专用 Portal，且不修改 `agent-loop`。Session 日志仍是诊断真源；SQLite 分别保存路由协调/审计和可重建的跨 Session 搜索索引，RAG 仍不在本版本范围内。
 
 ## 运行时流程
 
@@ -23,18 +23,19 @@ kubernetes_*        -> ctx.kubernetes   -> 原生 kubeconfig 客户端 -> Kubern
                               |
                  aiops_incident_report
                               |
-                aiops/incident-state
+                plugin:aiops/incident-state
                               |
        explicit operator verdict -> aiops_incident_feedback
                               |
-                 aiops/operator-feedback
+                 plugin:aiops/operator-feedback
                        /             \
           Session persistence   aiopsIncident projection
-                    |
-       disposable SQLite session-query index
-                    |
- incident history / feedback history / routing audit
-                    |
+                    |                   \
+       disposable SQLite session-query    aiops-delivery 变更订阅
+                    |                                \
+ incident history / feedback history /      有界 IM webhook POST
+ routing audit                                        |
+                    |                      plugin:aiops/delivery 标记
        同源 Portal snapshot + revision fence 设置
                     |
  overview / detail / route audit / 路由策略 dry-run
@@ -68,9 +69,13 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 ## 事件状态
 
-每个 `aiops/incident-state` 事件都包含完整当前 `AiopsIncidentState`：版本、稳定事件编号、标题、严重级别、状态、完整证据、假设与建议。只有在当前用户明确确认、修正或否定诊断后，Agent 才能追加 `aiops/operator-feedback`。反馈包含确定性 ID、`incidentId`、所审核的 `reportSeq`、verdict 与说明；修正还包含 correction，且从不改写报告。两条写入路径都在追加前后执行 Session 持久化检查点。
+每个 `plugin:aiops/incident-state` 事件都包含完整当前 `AiopsIncidentState`：版本、稳定事件编号、标题、严重级别、状态、完整证据、假设与建议。只有在当前用户明确确认、修正或否定诊断后，Agent 才能追加 `plugin:aiops/operator-feedback`。反馈包含确定性 ID、`incidentId`、所审核的 `reportSeq`、verdict 与说明；修正还包含 correction，且从不改写报告。两条写入路径都在追加前后执行 Session 持久化检查点。
 
 `aiopsIncident` 投影采用最后一个有效写入，并校验恢复的缓存值及重放的每个事件。不提供单独的 invariant companion，因为不存在第二个权威观测：投影解码的事件本身就是持久事实来源，而工具会在提交下一事件前检查生命周期连续性。
+
+## 诊断结论推送
+
+`aiops-delivery` 订阅 `aiopsIncident` 投影变更，把符合条件的报告推送到一个 IM incoming webhook——飞书交互卡片、钉钉 markdown 或 Slack 文本。webhook URL 通过凭证引用（`webhookUrlEnv`）提供，因此从不进入 patch 或设置存储，且必须是干净的 https URL。低于 `minSeverity` 的报告先跳过，待严重级别升级后重新评估；已投递标记阻止同一事件之后的一切重复推送，而失败的投递爆发会写入带截断失败原因的 `plugin:aiops/delivery` 记录，让后续报告触发重试。推送只承担信息通知职责：每个决策只追加一条可审计记录，从不改变基础设施。
 
 ## 持久化、数据库与 RAG
 

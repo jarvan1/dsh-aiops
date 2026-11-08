@@ -131,6 +131,21 @@
     - id: aiops-incident
       name: '@deepseek-ai/dsh-aiops-incident'
 
+    # Push completed diagnoses to an IM incoming webhook (Feishu, DingTalk,
+    # or Slack). The webhook URL stays in a credential reference so it is
+    # never embedded in this patch or the settings store.
+    - id: aiops-delivery
+      name: '@deepseek-ai/dsh-aiops-delivery'
+      config:
+        provider: feishu
+        webhookUrlEnv: AIOPS_DELIVERY_WEBHOOK_URL
+        minSeverity: warning
+        portalBaseUrl: !!js process.env.AIOPS_PORTAL_PUBLIC_URL || ''
+        timeoutMs: 10000
+        maxAttempts: 2
+        retryBackoffMs: 2000
+        maxResponseBytes: 65536
+
     - id: aiops-history-tools
       name: '@deepseek-ai/dsh-tool-aiops-history'
       config:

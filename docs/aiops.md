@@ -2,7 +2,7 @@
 
 English | [中文](aiops.zh.md)
 
-The DSH AIOps subsystem is an Alertmanager-driven, read-only investigation, operator-feedback, and history loop over current alerts, Prometheus metrics, Kubernetes objects and Events, bounded Pod logs, and durable incident records. It adds authenticated webhook ingress, storm-controlled persistent fingerprint routing, one packaged diagnostic skill, three swappable observation capabilities, fourteen model tools, durable route/incident/feedback events, and a dedicated Portal inside DSH Web without changing `agent-loop`. Session logs remain diagnostic truth; SQLite stores routing coordination/audit and a separately rebuildable cross-Session search index, while RAG remains outside this version.
+The DSH AIOps subsystem is an Alertmanager-driven, read-only investigation, operator-feedback, and history loop over current alerts, Prometheus metrics, Kubernetes objects and Events, bounded Pod logs, and durable incident records. It adds authenticated webhook ingress, storm-controlled persistent fingerprint routing, one packaged diagnostic skill, three swappable observation capabilities, fourteen model tools, durable route/incident/feedback events, IM push of completed diagnoses, and a dedicated Portal inside DSH Web without changing `agent-loop`. Session logs remain diagnostic truth; SQLite stores routing coordination/audit and a separately rebuildable cross-Session search index, while RAG remains outside this version.
 
 ## Runtime flow
 
@@ -23,13 +23,22 @@ kubernetes_*        -> ctx.kubernetes   -> native kubeconfig client -> Kubernete
                               |
                  aiops_incident_report
                               |
-                aiops/incident-state
+                plugin:aiops/incident-state
                               |
        explicit operator verdict -> aiops_incident_feedback
                               |
-                 aiops/operator-feedback
+                 plugin:aiops/operator-feedback
                        /             \
           Session persistence   aiopsIncident projection
+                    |                   \
+       disposable SQLite session-query    aiops-delivery change feed
+                    |                                \
+ incident history / feedback history /      bounded IM webhook POST
+ routing audit                                        |
+                    |                      plugin:aiops/delivery marker
+       same-origin Portal snapshot + revision-fenced settings
+                    |
+ overview / detail / route audit / routing-policy dry-run
                     |
        disposable SQLite session-query index
                     |
@@ -68,9 +77,13 @@ Each capability combines its Service Definition and current Provider in one pack
 
 ## Incident state
 
-Every `aiops/incident-state` event contains the complete current `AiopsIncidentState`: version, stable incident ID, title, severity, status, complete evidence, hypotheses, and recommendations. Only after the current user explicitly confirms, corrects, or rejects a diagnosis may the Agent append `aiops/operator-feedback`. Feedback has a deterministic ID, `incidentId`, reviewed `reportSeq`, verdict, and note; corrections also carry replacement wording and never rewrite the report. Both write paths checkpoint Session persistence before and after append.
+Every `plugin:aiops/incident-state` event contains the complete current `AiopsIncidentState`: version, stable incident ID, title, severity, status, complete evidence, hypotheses, and recommendations. Only after the current user explicitly confirms, corrects, or rejects a diagnosis may the Agent append `plugin:aiops/operator-feedback`. Feedback has a deterministic ID, `incidentId`, reviewed `reportSeq`, verdict, and note; corrections also carry replacement wording and never rewrite the report. Both write paths checkpoint Session persistence before and after append.
 
 The `aiopsIncident` projection is last-valid-write-wins and validates both restored cache values and each replayed incident event. There is no separate invariant companion because there is no second authoritative observation: the projection decodes the event that is itself the durable source, while the tool checks lifecycle continuity before committing the next event.
+
+## Diagnosis delivery
+
+`aiops-delivery` subscribes to the `aiopsIncident` change feed and pushes each qualifying report to one IM incoming webhook — Feishu interactive cards, DingTalk markdown, or Slack text. The webhook URL lives behind a credential reference (`webhookUrlEnv`) so it never enters the patch or settings store, and it must be a clean https URL. Reports below `minSeverity` are skipped until severity escalates; a delivered marker prevents any later re-push for the same incident, while a failed burst records `plugin:aiops/delivery` with the bounded failure reason so a later report retries. Delivery is informational only: it adds one auditable record per decision and never changes infrastructure.
 
 ## Persistence, database, and RAG
 
