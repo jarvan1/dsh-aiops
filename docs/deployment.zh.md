@@ -67,6 +67,21 @@ curl -s -X POST http://127.0.0.1:3081/alertmanager \
 
 canary 会走完整链路：认证 ingress → 路由轮次 → 确定性诊断 Session（profile 内需已配置模型）→ `aiops_incident_report` → 推送 → IM 会话消息加一条 `plugin:aiops/delivery` `delivered` 记录。诊断质量依赖 Prometheus/Alertmanager/Kubernetes 连通性，但 delivery 冒烟只需要模型产出事件报告。切换 provider 直接在设置中改 `provider`；轮换 IM webhook token 只需更新凭证值——投递每次尝试都重新解析，无需重启。
 
+## 容器镜像
+
+仓库自带多阶段 `Dockerfile`：在 `node:24-slim` 上构建 GitHub 源码 bundle，构建期预置 DSH Web profile，并由 `docker-entrypoint.sh` 启动——容器首次启动无需网络。Session、SQLite 存储、设置和 `.credentials.yaml` 全部位于 `DSH_HOME` 卷（`/data`）：
+
+```sh
+docker build -t dsh-aiops:dev .
+docker run -d --name dsh-aiops -p 8080:8080 -p 3081:3081 \
+  -v dsh-aiops-data:/data \
+  -e AIOPS_ALERTMANAGER_WEBHOOK_SECRET='<long-random-value>' \
+  dsh-aiops:dev
+curl -s http://127.0.0.1:8080/api/aiops/healthz
+```
+
+用 `-e` 注入的凭证由环境回退解析；持久轮换应把它们移入 `/data/.credentials.yaml`（权限 `0600`）。DSH 拒绝通配绑定地址，所以 entrypoint 把 DSH Web 端口（`DSH_WEB_PORT`，默认 8080）和 Alertmanager 接收器（`AIOPS_WEBHOOK_PORT`，默认 3081）都绑定到容器主网卡地址；发布端口后宿主机仍可访问两者。在反向代理或编排器后面时，设置 `DSH_PUBLIC_URL` 并按空格分隔重复填写 `DSH_TRUSTED_HOSTS`（多个 authority），DSH 才信任外部 Host。上文 TLS 反向代理与信任边界的规则同样适用。
+
 ## 升级与配置迁移
 
 升级前备份 DSH settings 文档、Session workspace、`aiops-router.sqlite` 与凭据文件。Router schema 会接受 F.2 之前的 `alertnameAllowlist`，使旧 profile 能启动并输出弃用警告，同时采用安全的通用默认值：忽略 `Watchdog` 和 `InfoInhibitor`，缺失/未知 severity 映射为 `warning`。启动后应立即把旧字段替换为显式 `routingPolicy`；旧 allowlist 不会被错误解释为排除列表。

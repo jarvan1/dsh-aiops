@@ -91,6 +91,21 @@ curl -s -X POST http://127.0.0.1:3081/alertmanager \
 
 The canary exercises the full loop: authenticated ingress → router round → deterministic diagnostic Session (the model must be configured in the profile) → `aiops_incident_report` → delivery push → IM thread message plus a `plugin:aiops/delivery` `delivered` record. Diagnosis quality depends on Prometheus/Alertmanager/Kubernetes connectivity, but the delivery smoke test only needs the model to produce an incident report. Switch providers by editing `provider` in settings; rotate the IM webhook token by updating the credential value — delivery re-resolves it per attempt without a restart.
 
+## Container image
+
+The repository ships a multi-stage `Dockerfile` that builds the GitHub source bundle on `node:24-slim`, pre-seeds a DSH Web profile at build time, and boots it through `docker-entrypoint.sh` — the first container start needs no network. Sessions, SQLite stores, settings, and `.credentials.yaml` all live under the `DSH_HOME` volume (`/data`):
+
+```sh
+docker build -t dsh-aiops:dev .
+docker run -d --name dsh-aiops -p 8080:8080 -p 3081:3081 \
+  -v dsh-aiops-data:/data \
+  -e AIOPS_ALERTMANAGER_WEBHOOK_SECRET='<long-random-value>' \
+  dsh-aiops:dev
+curl -s http://127.0.0.1:8080/api/aiops/healthz
+```
+
+Credentials injected with `-e` are resolved by the ambient credential fallbacks and should be moved into the persisted `/data/.credentials.yaml` (mode `0600`) for durable rotation. The entrypoint binds both the DSH Web port (`DSH_WEB_PORT`, default 8080) and the Alertmanager receiver (`AIOPS_WEBHOOK_PORT`, default 3081) to the container's primary interface address, because DSH rejects wildcard bind addresses; published ports still reach both from the host. Behind a reverse proxy or orchestrator, set `DSH_PUBLIC_URL` and repeat `DSH_TRUSTED_HOSTS` (space-separated authorities) so DSH trusts the external Host. The same TLS reverse-proxy and trust-boundary rules from above apply unchanged.
+
 ## Upgrade and configuration migration
 
 Back up the DSH settings document, Session workspace, `aiops-router.sqlite`, and credential file before upgrading. The router schema accepts the pre-F.2 `alertnameAllowlist` field so an old profile still starts, logs a deprecation warning, and adopts safe general-routing defaults: ignore `Watchdog` and `InfoInhibitor`, and map missing/unknown severity to `warning`. Replace the old field with explicit `routingPolicy` immediately; the old allowlist is not interpreted as an exclusion list.

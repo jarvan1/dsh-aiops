@@ -1,0 +1,15 @@
+.git
+.github
+node_modules
+**/node_modules
+packages/*/lib
+packages/*/lib-types
+**/*.tsbuildinfo
+**/*.sqlite
+**/*.sqlite-journal
+deploy
+docs/decisions
+Dockerfile
+.dockerignore
+TODO.md
+CODEX_HANDOFF.md

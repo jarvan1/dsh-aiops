@@ -14,6 +14,17 @@ The project follows semantic-versioning conventions. Changes that have not yet b
 
 - Full build, 25 test files and 176 tests pass (one opt-in real-cluster test remains skipped), GitHub source-package preparation, link check, and `git diff --check` pass. The router suite now runs its fake agents on real `Session` instances, and the four new tests cover the resolved transition append, the firing-only no-op, the already-resolved skip, and fingerprint release without a persisted report.
 
+## Unreleased — 2026-11-08 — Container image
+
+### Added
+
+- Added a multi-stage `Dockerfile`, `.dockerignore`, and `scripts/docker-entrypoint.sh`: the image builds the GitHub source bundle on `node:24-slim`, pre-seeds a DSH Web profile at build time (first boot needs no network), and re-points the pnpm `link:` symlink absolutely after the seed copy. Both the DSH Web port and the Alertmanager receiver bind the container's primary interface address, because DSH rejects wildcard binds; `DSH_PUBLIC_URL`/`DSH_TRUSTED_HOSTS` support proxied deployments.
+- Documented the container run in the bilingual deployment guide; corrected the stale `0.1.2-rc.1` DSH version in the Chinese root README.
+
+### Validation
+
+- The image builds end to end and boots the seeded profile offline: `/api/aiops/healthz` returns ok, `/api/aiops/readyz` reports `router` and `webhook` components ready, one authenticated Alertmanager canary returns `202`, and a wrong bearer is rejected with `401`.
+
 ## Unreleased — 2026-11-08 — Diagnosis IM delivery (aiops-delivery)
 
 ### Added

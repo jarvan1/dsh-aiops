@@ -1,23 +1,23 @@
 # DSH AIOps TODO
 
-Snapshot: 2026-11-08, after the DSH 0.2.2-rc.1 upgrade (0.2.0-rc.1).
+Snapshot: 2026-11-08, after the DSH 0.2.2-rc.1 upgrade, aiops-delivery, alert-recovery linkage, and the container image.
 
 ## Now
 
-- [ ] **Commit the pending work.** The DSH 0.2.2-rc.1 upgrade plus the new `aiops-delivery` package are verified green (`pnpm run build`, `pnpm exec vitest run` 172 passed / 1 skipped, `pnpm run build:github`) but still uncommitted on `main`.
-- [ ] **aiops-delivery real-IM smoke test.** Implementation is complete (see CHANGELOG 2026-11-08); remaining: one manual end-to-end push against a real Feishu/钉钉/Slack webhook in a disposable profile, including token rotation without restart.
-- [x] **aiops-delivery — 诊断结论推送（已完成实现）.** New `aiops-delivery` package: pushes each qualifying diagnosis report to an IM incoming webhook.
-  - Providers: 飞书 (interactive card), 钉钉 (markdown), Slack (incoming webhook text).
-  - Config (Loader entry, projected into the settings UI): `provider`, `webhookUrlEnv` (credential reference — the URL never enters the committed patch or settings store), `minSeverity` gate (default `warning`), `portalBaseUrl` deep-link prefix, `timeoutMs`, bounded `maxAttempts`/`retryBackoffMs`/`maxResponseBytes`.
-  - Trigger: `sessionProjections.onChanged` on the `aiopsIncident` key, processed off the commit critical section with per-session in-flight coalescing.
-  - Audit + idempotency: durable `plugin:aiops/delivery` marker (`delivered` | `failed`) per decision; delivered markers block re-push across restarts, failed bursts retry on later report updates, below-threshold reports re-evaluate on escalation.
+- [ ] **aiops-delivery real-IM smoke test.** Implementation is complete (see CHANGELOG 2026-11-08); remaining: one manual end-to-end push against a real Feishu/钉钉/Slack webhook in a disposable profile or the container image, including token rotation without restart.
 
 ## Next
 
-- [ ] **告警恢复联动.** Alertmanager resolved notifications reconcile the incident lifecycle: append a resolved transition (or operator-feedback-style record) instead of leaving sessions `investigating` forever.
 - [ ] **诊断复用.** Before opening a new diagnostic session, search `aiops_incident_list`/`aiops_incident_search` for a recent similar incident (same alertname + fingerprint family) and attach its prior hypotheses/recommendations as starting context.
-- [ ] **Real-environment E2E regression.** Re-run the k3s + Alertmanager fixture E2E against the upgraded stack (0.2.x sessions, plugin records, native Kubernetes client).
+- [ ] **Route-event ignorable marker.** `aiops/alert-routed` events are appended through the `session.append` cast, which drops the `{ignorable: true}` option on real sessions — the current 0.2.2-rc.1 reader still replays them, but a stricter future reader may refuse. Migrate the event type to the `plugin:` grammar (`plugin:aiops/alert-routed` via `appendPluginRecord` + a `PluginRecordMap` declaration), updating portal snapshot reads, history tooling, and tests in one change.
+- [ ] **Real-environment E2E regression.** Re-run the k3s + Alertmanager fixture E2E against the upgraded stack (0.2.x sessions, plugin records, native Kubernetes client), including one firing → resolved cycle to exercise the deterministic lifecycle closure in a real Session.
 - [ ] **External-cluster deployment doc.** Bilingual guide: external kubeconfig credential options (kubeconfig path vs exec-credential), strict read-only RBAC manifest aligned to the exact tool surface, `kubectl auth can-i --list` verification checklist.
+
+## Done (this snapshot)
+
+- [x] **aiops-delivery — 诊断结论推送.** IM webhook push with durable `plugin:aiops/delivery` markers, severity gate, per-attempt credential re-resolution.
+- [x] **告警恢复联动.** After a recovery turn settles, the router appends the carried-forward `resolved` incident state with `alert-recovery-*` evidence; idempotent, same lifecycle validation as model reports, recovery prompt defers closure to the router.
+- [x] **Container image.** Multi-stage `Dockerfile` + entrypoint: build-time profile seed (offline first boot), `DSH_HOME` volume, proxy/trusted-host env support; documented in the bilingual deployment guide.
 
 ## Deferred (explicitly)
 

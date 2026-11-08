@@ -10,7 +10,7 @@
 
 | 组件 | 适配版本 |
 | --- | --- |
-| DSH | `@deepseek-ai/dsh@0.1.2-rc.1` |
+| DSH | `@deepseek-ai/dsh@0.2.2-rc.1` |
 | Node.js | `^22.19.0` 或 `>=24.0.0` |
 | pnpm | `11.7.0`（需要 `>=10` 的 Git prepare 脚本放行语义） |
 
@@ -23,7 +23,7 @@ dsh plugin --profile web add github:jarvan1/dsh-aiops
 如果没有全局 `dsh` 命令，可使用适配版本的 CLI：
 
 ```sh
-npx -y @deepseek-ai/dsh@0.1.2-rc.1 plugin --profile web add github:jarvan1/dsh-aiops
+npx -y @deepseek-ai/dsh@0.2.2-rc.1 plugin --profile web add github:jarvan1/dsh-aiops
 ```
 
 pnpm 10 及更高版本会在首次安装时阻止 Git 依赖的 `prepare` 构建。失败信息会输出一个包含实际仓库与 commit 的 `allowBuilds` 条目；请把该**精确键值**复制到 `<DSH_HOME>/profiles/web/pnpm-workspace.yaml`（默认通常为 `~/.dsh/profiles/web/pnpm-workspace.yaml`），然后重新执行安装命令。它的形式如下：
