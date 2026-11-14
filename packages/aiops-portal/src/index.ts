@@ -2,7 +2,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { AgentQueryError, AgentRegistryError } from '@deepseek-ai/dsh-aiops-agents'
 import type {} from '@deepseek-ai/dsh-aiops-incident-router'
-import { KubernetesQueryError } from '@deepseek-ai/dsh-aiops-kubernetes'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-session-query'
@@ -29,7 +28,7 @@ export * from './snapshot.ts'
 export * from './types.ts'
 
 export const name = 'aiops-portal'
-export const inject = ['aiopsAgents', 'aiopsIncidents', 'aiopsIncidentRouter', 'kubernetes', 'credentials']
+export const inject = ['aiopsAgents', 'aiopsIncidents', 'aiopsIncidentRouter', 'credentials']
 
 export interface Config {
   readonly maxIncidents?: number
@@ -103,15 +102,9 @@ async function readJsonBody(req: import('node:http').IncomingMessage, maxBytes =
 function connectionRequest(value: unknown): ConnectionTestRequest | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
   const target = Reflect.get(value, 'target')
-  if (target === 'prometheus' || target === 'alertmanager') {
-    const baseUrl = Reflect.get(value, 'baseUrl')
-    return typeof baseUrl === 'string' ? { target, baseUrl } : undefined
-  }
-  if (target !== 'kubernetes') return undefined
-  const kubeconfig = Reflect.get(value, 'kubeconfig')
-  const context = Reflect.get(value, 'context')
-  if ((kubeconfig !== undefined && typeof kubeconfig !== 'string') || (context !== undefined && typeof context !== 'string')) return undefined
-  return { target, ...(kubeconfig === undefined ? {} : { kubeconfig }), ...(context === undefined ? {} : { context }) }
+  if (target !== 'prometheus' && target !== 'alertmanager') return undefined
+  const baseUrl = Reflect.get(value, 'baseUrl')
+  return typeof baseUrl === 'string' ? { target, baseUrl } : undefined
 }
 
 function routingPolicyDryRunRequest(value: unknown): RoutingPolicyDryRunRequest | undefined {
@@ -125,28 +118,14 @@ function routingPolicyDryRunRequest(value: unknown): RoutingPolicyDryRunRequest 
   return { labels: Object.fromEntries(entries) as Record<string, string>, settings: settings as RoutingPolicyDryRunRequest['settings'] }
 }
 
-export async function testPortalConnection(ctx: Context, request: ConnectionTestRequest, signal: AbortSignal): Promise<ConnectionTestResult> {
-  if (request.target !== 'kubernetes') return testEndpointConnection(request.target, request.baseUrl, signal)
-  const started = performance.now()
-  try {
-    const result = await ctx.kubernetes.testConnection({
-      ...(request.kubeconfig === undefined ? {} : { kubeconfig: request.kubeconfig }),
-      ...(request.context === undefined ? {} : { context: request.context }),
-    }, signal)
-    const missingPermissions = Object.entries(result.capabilities).filter(([, allowed]) => !allowed).map(([name]) => name)
-    const latencyMs = Math.max(0, Math.round(performance.now() - started))
-    if (missingPermissions.length > 0) return { ok: false, code: 'rbac_denied', latencyMs, missingPermissions }
-    return { ok: true, latencyMs, kubernetes: { context: result.context, cluster: result.cluster, namespace: result.namespace, server: result.server } }
-  } catch (error: unknown) {
-    const latencyMs = Math.max(0, Math.round(performance.now() - started))
-    if (!(error instanceof KubernetesQueryError)) return { ok: false, code: 'unreachable', latencyMs }
-    const code: import('./types.ts').ConnectionTestFailureCode = error.code === 'invalid_request' ? 'invalid_kubeconfig'
-      : error.code === 'authentication_failed' ? 'authentication_failed'
-        : error.code === 'forbidden' ? 'forbidden'
-          : error.code === 'timeout' ? 'timeout'
-            : error.code === 'credential_exec_missing' ? 'credential_exec_missing' : 'unreachable'
-    return { ok: false, code, latencyMs }
-  }
+export async function testPortalConnection(
+  _ctx: Context,
+  request: ConnectionTestRequest,
+  signal: AbortSignal,
+): Promise<ConnectionTestResult> {
+  // Cluster connectivity is no longer a data-source credential test: the
+  // Clusters view probes a registered agent and reports its own result.
+  return testEndpointConnection(request.target, request.baseUrl, signal)
 }
 
 

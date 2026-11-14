@@ -1,5 +1,5 @@
 ---
-description: "通过 kubeconfig 直连 Kubernetes API 的只读 Provider，并保留可选 kubectl 兼容入口。"
+description: "DSH AIOps 的只读 Kubernetes 能力，由每次诊断绑定的集群 agent 执行。"
 kind: "package-reference"
 ---
 
@@ -9,53 +9,37 @@ kind: "package-reference"
 
 ## 概述
 
-本包提供与 Provider 无关的 `ctx.kubernetes` Service，用于读取对象、Event 和有界非流式 Pod 日志。默认的 `NativeKubernetesRuntime` 使用官方 `@kubernetes/client-node` 加载 kubeconfig 并直接调用 API Server，因此 DSH 主机不需要安装 `kubectl`。该能力不暴露变更、容器 exec、任意 URL、watch 或原始命令入口。
+本包提供与 Provider 无关的 `ctx.kubernetes` Service，用于读取对象、Event 和有界非流式 Pod 日志。它的 Provider 只走 agent：每次读取都是发往 [`dsh-aiops-agents`](../aiops-agents/README.zh.md) 中已注册集群 agent WebSocket 的一条类型化请求。DSH 主机不持有 kubeconfig、不运行 `kubectl`，也无法直接连接任何集群 API Server。该能力不暴露变更、容器 exec、任意 URL、watch 或原始命令入口。
 
 ## 使用本包
 
 ```yaml
 - name: '@deepseek-ai/dsh-aiops-kubernetes'
   config:
-    kubeconfig: /srv/dsh/.kube/config
-    context: production-readonly
-    timeoutMs: 30000
-    maxResponseBytes: 2000000
+    defaultCluster: prod-sh
     defaultLogTailLines: 200
     maxLogTailLines: 2000
 ```
 
-省略 `kubeconfig` 和 `context` 时使用标准 kubeconfig 发现与 `current-context`。显式路径必须是绝对路径，指向 DSH 服务端机器上的文件，而不是浏览器所在机器。AIOps Portal 只把路径和 context 保存到用户设置，不会把 kubeconfig 内容或凭据发送给浏览器。
+每个请求都指向一个已注册集群：incident router 把路由告警的 cluster label（router 可配置，默认 `cluster`）绑定到该次诊断，观测工具据此传入集群名。`defaultCluster` 只用于 router 未创建的 session —— 手动会话，或早于集群绑定存在的轮次。既无绑定也无默认值时，Kubernetes 工具以 `unreachable` 失败并说明没有绑定集群，诊断因此显式退化为 Alertmanager/Prometheus 证据，而不是误读另一个集群。
 
-Portal 连通性测试会访问集群版本端点，并通过 `SelfSubjectAccessReview` 检查所选默认 namespace 中诊断所需的三项最低权限：读取 Pod、列出 Event、读取 `pods/log` 子资源。Kubernetes、Prometheus 和 Alertmanager 三项测试全部通过后才能保存。
+集群连通性通过探测 agent 验证，而不是测试凭据。Portal 的**集群**页执行该探测并显示 agent 版本与能力集；数据源设置页只覆盖 Prometheus、Alertmanager 与 Webhook。
 
-原生对象读取器当前明确支持诊断内置集合：Pod、Service、Endpoints、ConfigMap、PVC/PV、Node、Namespace、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job 和 CronJob。Event 与日志读取保持有界；当 Kubernetes 没有对应服务端选项时，会在本地按闭区间上界过滤。
-
-### 可选 kubectl 兼容 Provider
-
-已有部署可以显式选择旧 Provider：
-
-```yaml
-- name: '@deepseek-ai/dsh-aiops-kubernetes/kubectl'
-  config:
-    command: kubectl
-    kubeconfig: /srv/dsh/.kube/config
-```
-
-该子路径需要 `ctx.subprocess` 和已安装的 `kubectl`；它不再是默认入口。
+封闭资源集合与 agent allowlist 一致：Pod、Service、Endpoints、ConfigMap、PVC/PV、Node、Namespace、Deployment、StatefulSet、DaemonSet、ReplicaSet、Job 与 CronJob。Event 与日志窗口在 agent 侧过滤并有界。
 
 ## 实现导航
 
 | 文件 | 作用 |
 |---|---|
-| [`src/runtime.ts`](src/runtime.ts) | 稳定 Service 接口、输入校验和 Event/日志窗口辅助逻辑 |
-| [`src/index.ts`](src/index.ts) | 默认原生 kubeconfig/API Provider 与 RBAC 连通性检查 |
-| [`src/kubectl.ts`](src/kubectl.ts) | 显式 kubectl 兼容 Provider |
+| [`src/runtime.ts`](src/runtime.ts) | 稳定 Service 接口、请求校验与日志请求解析 |
+| [`src/index.ts`](src/index.ts) | agent 版 Provider：集群解析、类型化读取、探测与错误映射 |
 | [`src/types.ts`](src/types.ts) | Provider 无关请求、结果和连接能力类型 |
 
 ## 已知限制
 
-- 使用 `users[].user.exec` 的 kubeconfig 不需要 `kubectl`，但 DSH 主机仍须安装其中指定的认证程序，例如 `aws`、`gcloud` 或 `kubelogin`。
-- 原生 Provider 使用有界资源白名单，尚不支持任意 API discovery 或自定义资源。
+- 每次读取都需要绑定集群的 agent 在线；服务端不再做配置文件流量或 RBAC 检查。
+- agent 的 allowlist 取代任意 API discovery 或自定义资源。
 - 所有读取均为快照；日志不会 follow，Event 也不会 watch。
+- 轮次的集群绑定在轮次开启时确定；若同一 fingerprint 中途迁移集群，仍会读取原集群直到下一轮。
 
-参见 [AIOps 子系统](../../docs/aiops.zh.md)和[面向模型的观测工具](../tool-aiops-observe/README.zh.md)。
+参见 [AIOps 子系统](../../docs/aiops.zh.md)、[agent 协议](../../agent/docs/protocol.zh.md)和[面向模型的观测工具](../tool-aiops-observe/README.zh.md)。

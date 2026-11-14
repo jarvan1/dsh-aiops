@@ -12,9 +12,14 @@ export AIOPS_E2E_RUN_ID=run-20260908
 export AIOPS_E2E_WEBHOOK_URL=http://HOST_REACHABLE_FROM_K3S:3081/alertmanager
 export AIOPS_E2E_PORTAL_URL=http://127.0.0.1:3080/api/aiops/portal
 export AIOPS_E2E_WEBHOOK_SECRET='use-a-disposable-secret-of-at-least-16-characters'
+# Kubernetes evidence is agent-only: the runner creates the cluster token in the
+# Portal, deploys the agent, and labels the Kubernetes alert with AIOPS_E2E_CLUSTER.
+export AIOPS_E2E_CLUSTER=run-20260908          # optional; defaults to e2e-<run-id>
+export AIOPS_E2E_AGENT_IMAGE=registry.example.com/aiops-agent:0.1.0
+export AIOPS_E2E_AGENT_SERVER=ws://HOST_REACHABLE_FROM_K3S:3080/api/aiops/agent
 ```
 
-Start DSH with the same secret, `AIOPS_WEBHOOK_HOST=0.0.0.0`, a persistent test workspace, working Prometheus/Alertmanager/Kubernetes settings, and a model capable of completing the packaged `aiops-diag` workflow. Then run:
+Start DSH with the same secret, `AIOPS_WEBHOOK_HOST=0.0.0.0`, a persistent test workspace, working Prometheus/Alertmanager settings (Kubernetes settings are not used), and a model capable of completing the packaged `aiops-diag` workflow. Then run:
 
 ```sh
 pnpm e2e:k3s:setup
@@ -26,7 +31,7 @@ pnpm e2e:k3s:verify-restart
 pnpm e2e:k3s:cleanup
 ```
 
-The matrix covers a real Prometheus Operator `AlertmanagerConfig`, CrashLoop, synthetic `TargetDown`, arbitrary alert names, missing and vendor-specific severity, firing/resolved/reopened rounds, duplicate delivery, burst grouping/pressure, and restart recovery. An always-firing `Watchdog` probe must appear as a new filtered route-audit row, proving the real Prometheus → AlertmanagerConfig → authenticated receiver path without consuming a model turn. Verification also requires distinct reopened Session identity, idempotent retry, storm-control outcomes, persisted reports, and Kubernetes/log, metric, and general-alert evidence branches.
+The matrix covers a real Prometheus Operator `AlertmanagerConfig`, CrashLoop, synthetic `TargetDown`, arbitrary alert names, missing and vendor-specific severity, firing/resolved/reopened rounds, duplicate delivery, burst grouping/pressure, and restart recovery. An always-firing `Watchdog` probe must appear as a new filtered route-audit row, proving the real Prometheus → AlertmanagerConfig → authenticated receiver path without consuming a model turn. Verification also requires distinct reopened Session identity, idempotent retry, storm-control outcomes, persisted reports, the connected cluster agent, and Kubernetes/log, metric, and general-alert evidence branches. The runner revokes the cluster token and removes the agent namespace and its RBAC during cleanup.
 
 The runner refuses implicit cluster context, malformed URLs, weak secrets, unsafe namespace/run identifiers, or execution without the exact confirmation guard. It passes the Secret to `kubectl apply -f -` over stdin, never prints it, and cleanup targets only the exact configured namespace. Always run cleanup, even after a failed verification. The Secret and kubeconfig must never be committed.
 

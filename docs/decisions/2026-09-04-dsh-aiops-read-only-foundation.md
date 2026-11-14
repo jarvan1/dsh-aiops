@@ -1,10 +1,12 @@
 # Agent Note: Read-only DSH AIOps foundation
 
-Status: implemented (incident storage amended 2026-11-14)
+Status: implemented (incident storage and Kubernetes access amended 2026-11-14)
 
 English | [中文](2026-09-04-dsh-aiops-read-only-foundation.zh.md)
 
 > **Amended 2026-11-14:** incident and feedback state moved from Session plugin events to the plugin-owned `aiops_incident` storage domain. The read-only boundary and package split stand. See [Move AIOps incident state into plugin-owned storage domains](2026-11-14-aiops-plugin-owned-incident-store.md).
+>
+> **Amended 2026-11-14 (M2):** `dsh-aiops-kubernetes` no longer loads a kubeconfig or runs `kubectl`; it runs typed reads on the cluster agent bound to each diagnosis. The read-only boundary, closed request surface, and package split stand. See [Reach every cluster through an outbound agent](2026-11-14-aiops-cluster-agent-gateway.md).
 
 ## Problem
 

@@ -12,6 +12,11 @@ export AIOPS_E2E_RUN_ID=run-20260908
 export AIOPS_E2E_WEBHOOK_URL=http://K3S可访问的DSH主机:3081/alertmanager
 export AIOPS_E2E_PORTAL_URL=http://127.0.0.1:3080/api/aiops/portal
 export AIOPS_E2E_WEBHOOK_SECRET='至少16字符的一次性测试密钥'
+# Kubernetes 证据只走 agent：运行器会在 Portal 中创建集群令牌、部署 agent，
+# 并在 Kubernetes 告警上打上 AIOPS_E2E_CLUSTER label。
+export AIOPS_E2E_CLUSTER=run-20260908          # 可选；默认 e2e-<run-id>
+export AIOPS_E2E_AGENT_IMAGE=registry.example.com/aiops-agent:0.1.0
+export AIOPS_E2E_AGENT_SERVER=ws://K3S可访问的DSH主机:3080/api/aiops/agent
 ```
 
 以相同密钥、`AIOPS_WEBHOOK_HOST=0.0.0.0`、持久测试 workspace、可用数据源设置和能够完成 `aiops-diag` 的模型启动 DSH，然后依次执行：

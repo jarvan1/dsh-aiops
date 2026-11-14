@@ -4,12 +4,12 @@ const replacements = new Map([
   ['@deepseek-ai/dsh-aiops-agents', '../../aiops-agents/lib/index.js'],
   ['@deepseek-ai/dsh-aiops-http-read', '../../aiops-http-read/lib/index.js'],
   ['@deepseek-ai/dsh-aiops-incident', '../../aiops-incident/lib/index.js'],
-  ['@deepseek-ai/dsh-aiops-kubernetes', '../../aiops-kubernetes/lib/index.js'],
 ])
 
 const files = [
   'packages/aiops-alertmanager/lib/index.js',
   'packages/aiops-prometheus/lib/index.js',
+  'packages/aiops-kubernetes/lib/index.js',
   'packages/aiops-portal/lib/index.js',
   'packages/incident-router/lib/index.js',
   'packages/tool-aiops-history/lib/index.js',

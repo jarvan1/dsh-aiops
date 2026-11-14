@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package gives the model ten read-only observation tools: Alertmanager current alerts; Prometheus instant/range queries, rule lookup, target health, and bounded metadata discovery; and Kubernetes object/list/Event/Pod-log reads. Use it with one Provider for each service to collect factual incident evidence. The tools expose no arbitrary HTTP fetch, shell command, arbitrary kubectl arguments, log following, or mutation. Provider limits bound every complete result returned to the model.
+This package gives the model ten read-only observation tools: Alertmanager current alerts; Prometheus instant/range queries, rule lookup, target health, and bounded metadata discovery; and Kubernetes object/list/Event/Pod-log reads. Use it with one Provider for each service to collect factual incident evidence. The Kubernetes tools read the cluster agent bound to the diagnosis: the incident router resolves the routed alert's cluster label per round, and the tools forward it so one diagnosis cannot read another cluster. The tools expose no arbitrary HTTP fetch, shell command, arbitrary kubectl arguments, log following, or mutation. Provider limits bound every complete result returned to the model.
 
 ## Table of Contents
 
@@ -67,7 +67,7 @@ Each tool translates snake-case model arguments to one provider-neutral Service 
 - [AIOps subsystem](../../docs/aiops.md) — observation-to-incident workflow.
 - [Alertmanager Provider](../aiops-alertmanager/README.md) — current-alert filters and HTTP limits.
 - [Prometheus provider](../aiops-prometheus/README.md) — query transport and bounds.
-- [Kubernetes provider](../aiops-kubernetes/README.md) — native kubeconfig/API reads and optional kubectl compatibility.
+- [Kubernetes provider](../aiops-kubernetes/README.md) — agent-backed reads bound to the diagnosed cluster.
 - [Incident state](../aiops-incident/README.md) — durable evidence, hypotheses, and recommendations.
 
 -----

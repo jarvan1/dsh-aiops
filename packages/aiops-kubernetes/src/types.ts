@@ -6,7 +6,12 @@ import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 export interface KubernetesExecutionTarget {
   /** Owning diagnostic working directory; retained across interchangeable Providers. */
   readonly cwd: string
-  /** Optional namespace; omission uses the selected context namespace or `default`. */
+  /**
+   * Registered cluster-agent name. Omission uses the Provider's `defaultCluster`;
+   * the incident router binds the routed alert's cluster label here.
+   */
+  readonly cluster?: string
+  /** Optional namespace; omission uses the agent's own namespace. */
   readonly namespace?: string
 }
 
@@ -89,10 +94,8 @@ export type KubernetesReadResult = JsonValue
 export type KubernetesLogsResult = string
 
 export interface KubernetesConnectionSpec {
-  /** Absolute server-side path. Empty or omitted uses normal kubeconfig discovery. */
-  readonly kubeconfig?: string
-  /** Empty or omitted uses the kubeconfig current context. */
-  readonly context?: string
+  /** Registered cluster-agent name; omission uses the Provider's `defaultCluster`. */
+  readonly cluster?: string
 }
 
 export interface KubernetesReadCapabilities {
@@ -101,10 +104,12 @@ export interface KubernetesReadCapabilities {
   readonly podLogs: boolean
 }
 
+/** Result of probing one cluster's agent; there is no host-side credential to test. */
 export interface KubernetesConnectionResult {
-  readonly context: string
   readonly cluster: string
-  readonly namespace: string
-  readonly server: string
+  readonly agentVersion: string
+  readonly protocol: number
   readonly capabilities: KubernetesReadCapabilities
+  /** Canonical resource names the agent advertises for get/list. */
+  readonly resources: readonly string[]
 }

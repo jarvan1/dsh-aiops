@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包向模型提供十个只读观测工具：Alertmanager 当前告警；Prometheus 即时/范围查询、规则查询、Target 健康和有界元数据发现；以及 Kubernetes 对象/列表/Event/Pod 日志读取。将其与各 Service 的一个 Provider 配合使用，可收集事实性的事件证据。这些工具不暴露任意 HTTP 抓取、shell 命令、任意 kubectl 参数、日志跟随或变更操作。Provider 限制约束返回给模型的每个完整结果。
+本包向模型提供十个只读观测工具：Alertmanager 当前告警；Prometheus 即时/范围查询、规则查询、Target 健康和有界元数据发现；以及 Kubernetes 对象/列表/Event/Pod 日志读取。将其与各 Service 的一个 Provider 配合使用，可收集事实性的事件证据。Kubernetes 工具读取本次诊断绑定的集群 agent：incident router 按轮次解析路由告警的 cluster label，工具把该名称透传给 Provider，因此一次诊断无法读取其他集群。这些工具不暴露任意 HTTP 抓取、shell 命令、任意 kubectl 参数、日志跟随或变更操作。Provider 限制约束返回给模型的每个完整结果。
 
 ## 目录
 
@@ -67,7 +67,7 @@ kind: "package-reference"
 - [AIOps 子系统](../../docs/aiops.zh.md)——从观测到事件的工作流。
 - [Alertmanager Provider](../aiops-alertmanager/README.zh.md)——当前告警过滤与 HTTP 限制。
 - [Prometheus Provider](../aiops-prometheus/README.zh.md)——查询传输与上限。
-- [Kubernetes Provider](../aiops-kubernetes/README.zh.md)——原生 kubeconfig/API 读取与可选 kubectl 兼容入口。
+- [Kubernetes Provider](../aiops-kubernetes/README.zh.md)——由绑定到本次诊断的集群 agent 执行读取。
 - [事件状态](../aiops-incident/README.zh.md)——持久证据、假设与建议。
 
 -----

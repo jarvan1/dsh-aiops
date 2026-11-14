@@ -27,6 +27,9 @@
         ruleId: aiops-alertmanager-router
         statePath: !!js dshHomePath('aiops-router.sqlite')
         workspacePath: !!js process.env.AIOPS_WORKSPACE || process.cwd()
+        # The routed alert's cluster label names the agent this diagnosis reads.
+        clusterLabel: cluster
+        defaultCluster: !!js process.env.AIOPS_DEFAULT_CLUSTER || ''
         agentPreset: standard
         permissionPreset: read-only
         # Route every alert by default. Keep this list limited to known noise
@@ -124,9 +127,9 @@
     - id: aiops-kubernetes
       name: '@deepseek-ai/dsh-aiops-kubernetes'
       config:
-        context: !!js process.env.KUBERNETES_CONTEXT
-        timeoutMs: 30000
-        maxResponseBytes: 2000000
+        # Reads execute on the diagnosed cluster's agent; the server holds no
+        # kubeconfig. Sessions the router did not open fall back to this name.
+        defaultCluster: !!js process.env.AIOPS_DEFAULT_CLUSTER || ''
         defaultLogTailLines: 200
         maxLogTailLines: 2000
 
@@ -161,6 +164,16 @@
 
     # Read-only Web tab over the configured diagnosis workspace. The endpoint
     # is served by the application's existing Web server, not the webhook port.
+    - id: aiops-agents
+      name: '@deepseek-ai/dsh-aiops-agents'
+      config:
+        maxClusters: 50
+        requestTimeoutMs: 30000
+        handshakeTimeoutMs: 10000
+        pingIntervalMs: 30000
+        idleTimeoutMs: 90000
+        maxPendingRequests: 32
+
     - id: aiops-portal
       name: '@deepseek-ai/dsh-aiops-portal'
       config:

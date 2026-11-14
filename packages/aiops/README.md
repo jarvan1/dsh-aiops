@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a general fingerprint router with durable queue/cooldown/resource budgets, low-cardinality health/readiness/Prometheus telemetry, the packaged `aiops-diag` skill, three observation Providers, ten observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; endpoints and the server-side kubeconfig path can be supplied through environment defaults or saved live in the Portal. Kubernetes reads need read-only cluster credentials but do not require kubectl.
+This bundle adds an Alertmanager-driven, read-only AIOps workflow to an existing DSH profile. It mounts a dedicated webhook listener, a general fingerprint router with durable queue/cooldown/resource budgets, low-cardinality health/readiness/Prometheus telemetry, the packaged `aiops-diag` skill, three observation Providers, ten observation tools, report and feedback write tools, five workspace-scoped history/audit tools, and a Web Portal. No shipped profile includes it by default. Startup requires `AIOPS_ALERTMANAGER_WEBHOOK_SECRET`; Prometheus and Alertmanager endpoints can be supplied through environment defaults or saved live in the Portal. Kubernetes reads go through registered cluster agents — the host needs no kubeconfig or kubectl — and `AIOPS_DEFAULT_CLUSTER` sets the fallback agent for alerts without a cluster label.
 
 ## Table of Contents
 
@@ -109,6 +109,6 @@ Adding or removing the layer changes the visible tool-schema prefix; provider en
 
 - **The layer requires an existing application profile** — it does not include `dsh-base`, an LLM provider, or a task runner.
 - **The listener has no TLS** — keep the default loopback bind behind a TLS reverse proxy, or explicitly protect an all-interface bind with network policy.
-- **Environment values are composition defaults** — the Web Portal can persist and apply endpoint, kubeconfig, and routing-policy selections live.
+- **Environment values are composition defaults** — the Web Portal can persist and apply endpoint and routing-policy selections live; cluster agents are managed in its Clusters view.
 - **Read-only credentials remain deployment-owned** — the Portal checks required Kubernetes RBAC, but cannot prove external Alertmanager/Prometheus ACL policy.
 - **One process owns the index path** — do not point another running Session Query Provider at the same `aiops-incidents.sqlite` file.

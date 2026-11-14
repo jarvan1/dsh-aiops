@@ -11,14 +11,14 @@ Alertmanager POST /alertmanager
              -> bearer authentication + bounded v4 normalization
              -> ctx.webhookRuntime
              -> durable queue / fingerprint grouping / cooldown / resource budgets
-             -> fingerprint / alert-round router
+             -> fingerprint / alert-round router + cluster binding from the alert label
              -> startsAt anchor + bounded absolute query window
              -> deterministic diagnostic Session
              -> load aiops-diag
                               |
 alertmanager_alerts -> ctx.alertmanager -> Alertmanager HTTP API v2
 prometheus_query*   -> ctx.prometheus   -> Prometheus HTTP API
-kubernetes_*        -> ctx.kubernetes   -> native kubeconfig client -> Kubernetes API
+kubernetes_*        -> ctx.kubernetes   -> cluster agent (bound to the round) -> Kubernetes API
              evidence + hypotheses + recommendations
                               |
                  aiops_incident_report
@@ -63,17 +63,17 @@ When a firing alert opens a new round (`created` or `reopened`), the router also
 | Alert delivery | [`dsh-webhook-alertmanager`](../packages/webhook-alertmanager/README.md), isolated HTTP listener, `ctx.webhookRuntime` | [`dsh-aiops-incident-router`](../packages/incident-router/README.md), `ctx.aiopsIncidentRouter` |
 | Alertmanager alerts | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.md), `ctx.alertmanager`, HTTP API v2 | `alertmanager_alerts` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Prometheus observation | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.md), `ctx.prometheus`, bounded HTTP query/discovery APIs | `prometheus_query`, `prometheus_query_range`, `prometheus_rules`, `prometheus_targets`, `prometheus_discovery` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
-| Kubernetes read | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.md), `ctx.kubernetes`, official native API client (optional kubectl compatibility subpath) | `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, `kubernetes_logs` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
+| Kubernetes read | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.md), `ctx.kubernetes`, typed reads over `ctx.aiopsAgents` (no host kubeconfig) | `kubernetes_get`, `kubernetes_list`, `kubernetes_events`, `kubernetes_logs` in [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.md) |
 | Diagnostic workflow | Packaged [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.md), registered globally | `aiops-diag` dynamically selects Alertmanager, Prometheus, service, and Kubernetes evidence branches |
 | Operations Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.md), fixed same-origin `/api/aiops/portal` | Persistent DSH Web sidebar action, Session view, live data-source/routing settings, and dry-run |
 | Product observability | [`dsh-aiops-observability`](../packages/aiops-observability/README.md), `ctx.aiopsTelemetry` | `/api/aiops/healthz`, `/api/aiops/readyz`, and low-cardinality `/api/aiops/metrics` |
-| Cluster agents | [`dsh-aiops-agents`](../packages/aiops-agents/README.md), `ctx.aiopsAgents`, `/api/aiops/agent` WebSocket | Portal cluster management, and the future agent-backed `KubernetesRuntime` (M2) |
+| Cluster agents | [`dsh-aiops-agents`](../packages/aiops-agents/README.md), `ctx.aiopsAgents`, `/api/aiops/agent` WebSocket | Portal cluster management and the agent-backed `ctx.kubernetes` reads |
 
 Each capability combines its Service Definition and current Provider in one package because they currently evolve as one concern. A second transport or remote execution provider is the trigger to split Provider packages; the Consumer already depends only on the abstract Service.
 
 ## Multi-cluster access
 
-Every cluster — including the one running DSH — is read through an outbound-only Go agent, not a host-side kubeconfig. The Portal issues one token per cluster and shows it once; the `aiops_agent` storage domain keeps only its SHA-256 digest, last four characters, timestamps, and the last reported agent version. The agent dials `/api/aiops/agent`, authenticates with that token, and announces its name, version, and capabilities; the server binds the name to the token, tracks `pending`/`connected`/`offline`/`revoked`, and runs typed `get`/`list`/`events`/`logs` reads plus `probe` over that socket. There is no path, URL, verb, or exec passthrough, and the server holds no cluster credential. A fresh install starts normally with zero clusters, never generates or logs a token, and shows a first-run prompt in the Portal; the agent's server URL is always explicit and must be reachable from inside the cluster. Diagnosis tools still read through the native provider until M2. See [the decision record](decisions/2026-11-14-aiops-cluster-agent-gateway.md) and [the agent guide](../agent/README.md).
+Every cluster — including the one running DSH — is read through an outbound-only Go agent, not a host-side kubeconfig. The Portal issues one token per cluster and shows it once; the `aiops_agent` storage domain keeps only its SHA-256 digest, last four characters, timestamps, and the last reported agent version. The agent dials `/api/aiops/agent`, authenticates with that token, and announces its name, version, and capabilities; the server binds the name to the token, tracks `pending`/`connected`/`offline`/`revoked`, and runs typed `get`/`list`/`events`/`logs` reads plus `probe` over that socket. There is no path, URL, verb, or exec passthrough, and the server holds no cluster credential. A fresh install starts normally with zero clusters, never generates or logs a token, and shows a first-run prompt in the Portal; the agent's server URL is always explicit and must be reachable from inside the cluster. Diagnosis tools read through that agent: the router binds each round to the cluster named by the alert's `cluster` label (`clusterLabel`/`defaultCluster` on the router), and the observation tools forward the binding, so one diagnosis cannot read another cluster. An unknown or invalid label binds nothing and Kubernetes evidence fails explicitly instead of reading a fallback cluster. See [the decision record](decisions/2026-11-14-aiops-cluster-agent-gateway.md) and [the agent guide](../agent/README.md).
 
 ## Incident state
 
@@ -93,7 +93,7 @@ RAG is deferred because the loop diagnoses from live operational state and there
 
 ## Safety boundary
 
-The package set contains no Alertmanager write, Kubernetes mutation, exec, arbitrary command, streaming log follow, remediation, or approval-bypass path. The Portal never returns the webhook bearer value; it exposes only URL and configured status, and its connection-test/dry-run POSTs reject cross-site browser requests. Deployment still owns the authenticated DSH Host boundary, TLS and reverse-proxy headers, network ACLs, Alertmanager/Prometheus access, kubeconfig selection, credential rotation, and read-only Kubernetes RBAC. See [production deployment and upgrade](deployment.md).
+The package set contains no Alertmanager write, Kubernetes mutation, exec, arbitrary command, streaming log follow, remediation, or approval-bypass path. The Portal never returns the webhook bearer value; it exposes only URL and configured status, and its connection-test/dry-run POSTs reject cross-site browser requests. Deployment still owns the authenticated DSH Host boundary, TLS and reverse-proxy headers, network ACLs, Alertmanager/Prometheus access, agent-token issuance and revocation, and the read-only Kubernetes RBAC the agent runs under. See [production deployment and upgrade](deployment.md).
 
 ## Current limits
 
@@ -183,7 +183,7 @@ abstract resolveLogs(request: KubernetesLogsRequest): KubernetesLogsSpec
  */
 abstract logs(spec: KubernetesLogsSpec, signal?: AbortSignal): Promise<KubernetesLogsResult>
 
-/** Validate kubeconfig/API connectivity and the diagnosis read permissions. */
+/** Probe the cluster agent and report its capabilities. */
 abstract testConnection(spec: KubernetesConnectionSpec, signal?: AbortSignal): Promise<KubernetesConnectionResult>
 ```
 

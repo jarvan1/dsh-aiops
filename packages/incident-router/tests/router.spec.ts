@@ -329,6 +329,59 @@ describe('AIOps incident router', () => {
     expect(JSON.stringify(agent?.followups[0])).toContain('English (en)')
   })
 
+  it('binds the routed alert cluster label to the Session and the prompt', async () => {
+    const test = harness()
+    await test.rule().run(delivery('cluster-d1', 'firing', alert('firing', {
+      labels: { alertname: 'KubePodCrashLooping', severity: 'critical', cluster: 'prod-sh' },
+    })), new AbortController().signal)
+    const [sessionId, agent] = [...test.agents.entries()][0] ?? []
+    expect(sessionId).toBeDefined()
+    expect(test.router.clusterForSession(sessionId!)).toBe('prod-sh')
+    const prompt = JSON.stringify(agent?.followups[0])
+    expect(prompt).toContain('Kubernetes evidence is bound to cluster agent')
+    expect(prompt).toContain('prod-sh')
+    expect(test.router.listControlAudit({ limit: 10 }).find(row => row.outcome === 'started'))
+      .toMatchObject({ cluster: 'prod-sh' })
+  })
+
+  it('keeps the round binding when a later alert names another cluster', async () => {
+    const test = harness()
+    const signal = new AbortController().signal
+    await test.rule().run(delivery('bind-1', 'firing', alert('firing', {
+      labels: { alertname: 'KubePodCrashLooping', severity: 'critical', cluster: 'prod-sh' },
+    })), signal)
+    await test.rule().run(delivery('bind-2', 'resolved', alert('resolved', {
+      labels: { alertname: 'KubePodCrashLooping', severity: 'critical', cluster: 'staging' },
+    })), signal)
+    const [sessionId, agent] = [...test.agents.entries()][0] ?? []
+    expect(test.router.clusterForSession(sessionId!)).toBe('prod-sh')
+    const prompt = JSON.stringify(agent?.followups[1])
+    expect(prompt).toContain('Kubernetes evidence is bound to cluster agent')
+    expect(prompt).toContain('cite it as the Kubernetes target')
+  })
+
+  it('falls back to the configured default cluster when no label is present', async () => {
+    const test = harness({ config: { ...config, defaultCluster: 'staging' } })
+    await test.rule().run(delivery('cluster-d2'), new AbortController().signal)
+    const [sessionId, agent] = [...test.agents.entries()][0] ?? []
+    expect(test.router.clusterForSession(sessionId!)).toBe('staging')
+    const prompt = JSON.stringify(agent?.followups[0])
+    expect(prompt).toContain('Kubernetes evidence is bound to cluster agent')
+    expect(prompt).toContain('staging')
+  })
+
+  it('never falls back to another cluster when the label value is invalid', async () => {
+    const test = harness({ config: { ...config, defaultCluster: 'staging' } })
+    await test.rule().run(delivery('cluster-d3', 'firing', alert('firing', {
+      labels: { alertname: 'KubePodCrashLooping', severity: 'critical', cluster: 'Prod_Cluster' },
+    })), new AbortController().signal)
+    const [sessionId, agent] = [...test.agents.entries()][0] ?? []
+    expect(test.router.clusterForSession(sessionId!)).toBeUndefined()
+    const prompt = JSON.stringify(agent?.followups[0])
+    expect(prompt).toContain('No Kubernetes cluster is bound to this diagnosis')
+    expect(prompt).not.toContain('bound to cluster agent')
+  })
+
   it('uses the current DSH locale preference for model output and persisted report text', async () => {
     const test = harness({ locale: 'zh' })
     await test.rule().run(delivery('zh-locale'), new AbortController().signal)

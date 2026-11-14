@@ -57,6 +57,7 @@ function IncidentDetail({ item, t }: { item: PortalIncident; t: Props['t'] }) {
     <dl className={css.metadata}>
       <div><dt>{t('session')}</dt><dd>{item.sessionId}</dd></div>
       <div><dt>{t('reported')}</dt><dd>{fmtTime(item.updatedAt)}</dd></div>
+      {item.lastRoute?.cluster === undefined ? null : <div><dt>{t('incidentCluster')}</dt><dd>{item.lastRoute.cluster}</dd></div>}
       {item.lastRoute === undefined ? null : <div><dt>{t('route')}</dt><dd>{item.lastRoute.outcome} · {item.lastRoute.reason}</dd></div>}
     </dl>
     <section><h3>{t('evidence')}</h3><ul>{incident.evidence.map(value => <li key={value.id}><Badge value={value.kind}/><span>{value.summary}</span></li>)}</ul></section>
@@ -71,7 +72,7 @@ function IncidentDetail({ item, t }: { item: PortalIncident; t: Props['t'] }) {
   </article>
 }
 
-export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, clusterActions, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, onClose, t }: DashboardProps) {
+export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, clusterActions, prometheusSettings, alertmanagerSettings, routingSettings, onClose, t }: DashboardProps) {
   const [snapshot, setSnapshot] = useState<PortalSnapshot | null>(null)
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -129,7 +130,7 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
       <button className={section === 'clusters' ? css.activeTab : ''} onClick={() => setSection('clusters')}>{t('clusters')} <span>{snapshot?.clusters.length ?? 0}</span></button>
     </nav>
     {section === 'settings'
-      ? <><ConnectionSettings loadWebhookConfiguration={loadWebhookConfiguration} testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} kubernetesSettings={kubernetesSettings} t={t}/><RoutingPolicySettings routingSettings={routingSettings} dryRunRoutingPolicy={dryRunRoutingPolicy} audit={snapshot?.routingPolicyAudit ?? []} t={t}/></>
+      ? <><ConnectionSettings loadWebhookConfiguration={loadWebhookConfiguration} testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} t={t}/><RoutingPolicySettings routingSettings={routingSettings} dryRunRoutingPolicy={dryRunRoutingPolicy} audit={snapshot?.routingPolicyAudit ?? []} t={t}/></>
       : loading && snapshot === null
         ? <div className={css.center}><span className={css.spinner}/>{t('loading')}</div>
         : error && snapshot === null
@@ -171,7 +172,7 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
   </main>
 }
 
-export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, clusterActions, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, t }: Props) {
+export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, clusterActions, prometheusSettings, alertmanagerSettings, routingSettings, t }: Props) {
   return <PortalDashboard
     loadSnapshot={loadSnapshot}
     loadWebhookConfiguration={loadWebhookConfiguration}
@@ -180,7 +181,6 @@ export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnect
     clusterActions={clusterActions}
     prometheusSettings={prometheusSettings}
     alertmanagerSettings={alertmanagerSettings}
-    kubernetesSettings={kubernetesSettings}
     routingSettings={routingSettings}
     t={t}
   />

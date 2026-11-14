@@ -76,7 +76,7 @@ A token is `dsha_` plus 32 random bytes in base64url. The durable row keeps its 
 ## Known Limitations and Deferred Work
 
 - **One replica owns a connection.** Live sockets are process state. With several server replicas, a read only succeeds on the replica holding the agent's socket; route diagnosis traffic to that replica (or run one replica) until shared connection routing exists.
-- **No provider wiring yet.** Diagnosis tools still read through the native kubeconfig provider (M2). This package already exposes `read`/`probe` in the shape the provider will use.
+- **Diagnosis reads are wired (M2).** `dsh-aiops-kubernetes` resolves the round's cluster binding and executes reads through this service; `probe` backs cluster connectivity in the Portal.
 - **No upgrade state machine.** `desiredVersion` is stored and advertised in `welcome`, but `drain`/`resume` coordination and the Portal upgrade flow are M3; the agent refuses self-upgrade by design.
 - **TLS is deployment-owned.** The route uses the host webserver's listener; terminate TLS with the host's `tls` config or a reverse proxy so agents can use `wss`.
 - **No token rotation schedule.** A token belongs to one cluster until revoked; a cluster that has connected is rotated by revoking and creating it again.

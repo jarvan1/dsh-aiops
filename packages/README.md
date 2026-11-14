@@ -29,7 +29,7 @@ Fourteen packages cover ingress, routing, acquisition, model interaction, a pack
 | [`aiops-http-read/`](aiops-http-read/README.md) | Shared bounded read-only HTTP acquisition | Stateless library |
 | [`aiops-alertmanager/`](aiops-alertmanager/README.md) | Read-only current-alert Service Definition and HTTP Provider | `ctx.alertmanager` |
 | [`aiops-prometheus/`](aiops-prometheus/README.md) | Read-only PromQL, rule, target, and metadata Service Definition and HTTP Provider | `ctx.prometheus` |
-| [`aiops-kubernetes/`](aiops-kubernetes/README.md) | Read-only native Kubernetes API Provider with optional kubectl compatibility | `ctx.kubernetes` |
+| [`aiops-kubernetes/`](aiops-kubernetes/README.md) | Read-only Kubernetes Provider over the cluster agent bound to each diagnosis | `ctx.kubernetes` |
 | [`tool-aiops-observe/`](tool-aiops-observe/README.md) | Ten model-facing observation tools | `ctx.tools` |
 | [`aiops-incident/`](aiops-incident/README.md) | Complete reports, append-only feedback, and write tools over a plugin-owned store | `ctx.aiopsIncidents`, `aiops_incident` domain |
 | [`aiops-delivery/`](aiops-delivery/README.md) | Pushes completed diagnoses to Feishu, DingTalk, or Slack incoming webhooks with durable markers | `aiopsIncidents/changed` feed, `aiops_delivery` domain |

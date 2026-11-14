@@ -4,6 +4,28 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-14 — Cluster-agent Kubernetes reads (M2)
+
+### Changed
+
+- `ctx.kubernetes` is now agent-only. Every object, Event, and Pod-log read is one typed request over the WebSocket of the cluster agent registered for that diagnosis; the DSH host holds no kubeconfig and cannot reach a cluster API server directly. The provider keeps the closed request surface, the resource allowlist, log-request shaping, and the error taxonomy, and maps the agent's failure codes onto `KubernetesQueryError` unchanged.
+- Each alert round is bound to one cluster: the incident router reads the `cluster` alert label (new `clusterLabel`, default `cluster`), persists the name with the round, states it in the first-turn prompt, and exposes `clusterForSession()` for the observation tools. A missing label falls back to the new router `defaultCluster`; an invalid label value binds nothing rather than silently reading another cluster, so Kubernetes evidence fails explicitly and the diagnosis degrades to Alertmanager/Prometheus evidence.
+- The router's SQLite schema is version 5: `incident_rounds` and `route_audit` gain a `cluster` column, a v4 database migrates in place, and a legacy round adopts the first usable binding it sees. Route audit rows now carry the bound cluster.
+- The observation tools resolve the session's cluster binding through `ctx.aiopsIncidentRouter` (optional lookup, no hard dependency) and pass it in every Kubernetes target. The Portal incident detail shows the bound cluster from the latest route.
+- Cluster connectivity is an agent probe, not a credential test: `KubernetesConnectionSpec` takes a cluster name, and the result reports the agent version, protocol, advertised resources, and mapped capabilities.
+
+### Removed
+
+- Removed `NativeKubernetesRuntime`, its kubeconfig loading, SelfSubjectAccessReview checks, and the `@kubernetes/client-node` dependency.
+- Removed the `./kubectl` compatibility provider and its subprocess dependency.
+- Removed the `kubeconfig`, `context`, `timeoutMs`, and `maxResponseBytes` settings, the Portal Kubernetes credential form and connection-test target, and the `KUBECONFIG`/`KUBERNETES_CONTEXT` composition defaults. The Portal now tests Prometheus and Alertmanager only; the `aiops-kubernetes` config is `defaultCluster` plus log tail bounds.
+- Removed the opt-in CrashLoopBackOff kubeconfig exercise; the guarded k3s matrix now provisions a real agent (new `AIOPS_E2E_AGENT_IMAGE`, `AIOPS_E2E_AGENT_SERVER`, optional `AIOPS_E2E_CLUSTER`), labels the Kubernetes alert with the cluster name, verifies the agent is connected, and revokes it during cleanup.
+
+### Validation
+
+- The workspace suite passes 26 test files and 199 tests: agent-backed Provider reads, cluster resolution and defaults, Event-window normalization, log shaping, error mapping, probe capability mapping, per-round binding with prompt instructions, invalid-label refusal, schema migration with backfill, and the Portal's two-source settings and cluster display.
+- The full build, GitHub source-package preparation, link check, and `git diff --check` pass. The Go agent suite is unchanged and still passes.
+
 ## Unreleased — 2026-11-14 — Multi-cluster agent (client and server gateway)
 
 ### Added

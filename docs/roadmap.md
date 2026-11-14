@@ -2,7 +2,7 @@
 
 English | [中文](roadmap.zh.md)
 
-Updated: 2026-09-08
+Updated: 2026-11-14
 
 ## Completed
 
@@ -18,7 +18,10 @@ Updated: 2026-09-08
 - Stage F.3.2: a thirteenth package now exposes exact liveness, component-aware readiness, and low-cardinality Prometheus metrics. The Alertmanager ingress and incident router publish bounded webhook outcomes, queue depth/age, grouped/deferred/dropped work, active diagnoses, dispatch failures, model token reservations, and fixed-bucket diagnostic latency without alert-derived labels.
 - Stage F.3.3: a guarded runner now creates and removes an isolated k3s namespace, installs Prometheus Operator rules plus an AlertmanagerConfig and bearer Secret over stdin, exercises the direct receiver matrix, and verifies route audit, Session/report evidence, retry, lifecycle, storm control, and restart recovery. A filtered `Watchdog` probe proves the real Prometheus → Alertmanager → authenticated receiver path.
 - Stage F.3.4: the Portal now manages versioned live routing settings for noise exclusions, severity normalization/defaults, cooldown, queue/retry, concurrency, and token budgets. Candidate policies must pass a side-effect-free normalized-label dry-run before one revision-fenced atomic save, and every committed change is durably audited.
+- Stage F.4 (M2): Kubernetes access is agent-only. A new `aiops-agents` package owns the cluster registry, one-time tokens, and the `/api/aiops/agent` WebSocket gateway; each alert round binds to the cluster agent named by its `cluster` label, and the observation tools forward that binding so a diagnosis cannot read another cluster. The native kubeconfig provider, the kubectl compatibility subpath, `KUBECONFIG`/`KUBERNETES_CONTEXT` defaults, and the Portal Kubernetes credential form were removed; cluster connectivity is an agent probe in the Portal.
 - Stage F.3.5: Portal credential disclosure was removed; browser POST probes reject cross-site requests; deployment-owned TLS, Host authentication, rotation, migration, retention, and release procedures are documented. The old allowlist schema starts with safe defaults and a warning, while clean isolated DSH install/start/restart/rotation/remove verification covers the supported Node/DSH stack.
+
+Stage F.4 validation covers token issuance and revocation, gateway authentication and handshake rejection, per-round cluster binding and prompt instructions, legacy-round backfill, the agent-backed Provider (cluster resolution, read shaping, error mapping, probe), Portal cluster routes, and readiness with zero clusters. The default suite passes 26 test files and 199 tests; a cross-language smoke ran the real Go agent against the real server gateway. The guarded k3s matrix now provisions and revokes a real agent.
 
 Stage D validation includes 17 passing test files and 108 passing tests in the default suite, plus one opt-in real-cluster test, skill-structure validation, relative documentation links, all eleven package tarballs, and isolated DSH Web profile install/config-dump/runtime-start/remove checks. The real exercise used an existing CrashLoopBackOff Pod through the product Kubernetes Provider to read the Pod, absolute-window Events, and bounded current and previous logs without mutation.
 

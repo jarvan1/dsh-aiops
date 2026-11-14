@@ -91,6 +91,16 @@ curl -s -X POST http://127.0.0.1:3081/alertmanager \
 
 The canary exercises the full loop: authenticated ingress → router round → deterministic diagnostic Session (the model must be configured in the profile) → `aiops_incident_report` → the `aiops_incident` storage domain → delivery push → IM thread message plus an `aiops_delivery` `delivered` marker. Diagnosis quality depends on Prometheus/Alertmanager/Kubernetes connectivity, but the delivery smoke test only needs the model to produce an incident report. Switch providers by editing `provider` in settings; rotate the IM webhook token by updating the credential value — delivery re-resolves it per attempt without a restart.
 
+## Cluster access
+
+Kubernetes evidence never leaves the DSH host through a kubeconfig. Every cluster, including the one running DSH, installs the Go agent from [`agent/`](../agent/README.md) and is registered by the Portal:
+
+1. Open the AIOps view → **Clusters** → create a token for the cluster name (`pending` until the agent connects).
+2. Deploy `agent/deploy/rbac.yaml` and the Deployment with `AIOPS_AGENT_NAME` set to that name and `AIOPS_AGENT_SERVER` set to the `/api/aiops/agent` URL reachable **from inside the cluster**.
+3. Make alerts carry the cluster name. The incident router reads the `cluster` alert label by default (`clusterLabel` on the `aiops-incident-router` entry) and binds each round to that agent; the observation tools then read only that cluster. `AIOPS_DEFAULT_CLUSTER` (used by both the router and `aiops-kubernetes`) covers alerts without the label; leave it empty so an unlabeled alert degrades to Alertmanager/Prometheus evidence instead of reading a default cluster.
+
+The server holds no cluster credential. Revoking a cluster in the Portal drops its live agent immediately; re-issue is available only while a cluster has never connected. `/api/aiops/readyz` stays ready with zero clusters and reports `components.clusters` plus `configured`/`total`/`connected`.
+
 ## Container image
 
 The repository ships a multi-stage `Dockerfile` that builds the GitHub source bundle on `node:24-slim`, pre-seeds a DSH Web profile at build time, and boots it through `docker-entrypoint.sh` — the first container start needs no network. Sessions, SQLite stores, settings, and `.credentials.yaml` all live under the `DSH_HOME` volume (`/data`):

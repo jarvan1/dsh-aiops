@@ -1,10 +1,12 @@
 # Agent Note：只读 DSH AIOps 基础
 
-状态：已实现（事件存储于 2026-11-14 修订）
+状态：已实现（事件存储与 Kubernetes 访存于 2026-11-14 修订）
 
 [English](2026-09-04-dsh-aiops-read-only-foundation.md) | 中文
 
 > **2026-11-14 修订：** 事件与反馈状态从 Session 插件事件迁入插件自有的 `aiops_incident` 存储域；只读边界与包划分不变。见[把 AIOps 事件状态迁入插件自有存储域](2026-11-14-aiops-plugin-owned-incident-store.zh.md)。
+>
+> **2026-11-14 修订（M2）：** `dsh-aiops-kubernetes` 不再加载 kubeconfig 或运行 `kubectl`，改为在每次诊断绑定的集群 agent 上执行类型化读取；只读边界、封闭请求面与包划分不变。见[通过出站 agent 访问每个集群](2026-11-14-aiops-cluster-agent-gateway.zh.md)。
 
 ## 问题
 

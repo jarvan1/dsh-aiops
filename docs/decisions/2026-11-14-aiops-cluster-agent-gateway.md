@@ -20,7 +20,7 @@ Each cluster runs a small outbound-only Go agent. The AIOps server holds no clus
 - The plaintext is shown exactly once, in the creation response, with the install steps. It never enters the snapshot, a log line, a URL, or browser storage.
 - The agent dials `wss://<server>/api/aiops/agent` with a bearer token and sends a `hello` carrying its name, version, and capabilities. The server authenticates the digest, requires the `hello` name to equal the token's cluster, answers `welcome`, and routes typed reads to that socket.
 - The protocol surface is closed: `get`, `list`, `events`, `logs`, and `probe`. There is no path, URL, verb, or exec passthrough, so a compromised server cannot turn an agent into an arbitrary API client. The agent keeps its own allowlist and RBAC; the server cannot widen it.
-- **The native kubeconfig provider is retired at M2, including for the cluster that runs DSH.** There is no local fallback and no provider-selection abstraction. One token belongs to one cluster; revoke-and-create is the only rotation.
+- **The native kubeconfig provider is retired (M2, done), including for the cluster that runs DSH.** There is no local fallback and no provider-selection abstraction. One token belongs to one cluster; revoke-and-create is the only rotation.
 - **Onboarding is a normal startup with zero clusters.** The server never generates or logs a token at boot. The Portal home view shows a first-run card prompting token creation, and `/readyz` stays ready while reporting `components.clusters` plus `configured`/`total`/`connected`.
 - **The agent's server URL is always explicit.** The server never infers, rewrites, or special-cases a same-cluster or loopback address. An agent in the DSH cluster follows the same URL and network path as a remote one, and deployment documentation states that the URL must be reachable from inside the cluster.
 - One cluster has at most one live connection. A newer handshake replaces the older socket (close `4006`); revocation closes the live socket (`4001`) and removes the digest, so later upgrades receive HTTP 401.
@@ -48,7 +48,7 @@ Negative / accepted costs:
 - Every deployment, including a single local cluster, gains a bootstrap step: create a token, install the agent, set a reachable server URL.
 - Live sockets are process state. With several server replicas, a read only succeeds on the replica holding the agent's socket until shared connection routing exists; deployments should run one replica or route diagnosis traffic accordingly.
 - The server and the agent must be released together for any protocol change; the major version is checked at handshake, and there is no in-place self-upgrade.
-- Until M2 lands, diagnosis tools still read through the native provider, so the deployment briefly carries both surfaces.
+- Removing the native provider deleted the host kubeconfig surface, the `KUBECONFIG`/`KUBERNETES_CONTEXT` composition defaults, the kubectl compatibility subpath, and the Portal Kubernetes credential form; cluster connectivity is now an agent probe.
 
 ## Verification
 

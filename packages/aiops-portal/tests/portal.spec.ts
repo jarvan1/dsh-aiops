@@ -4,7 +4,7 @@ import { Readable } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 import { filterPortalIncidents } from '../src/client/model.ts'
 import { testEndpointConnection } from '../src/connectivity.ts'
-import { apply, testPortalConnection } from '../src/index.ts'
+import { apply } from '../src/index.ts'
 import { readPortalSnapshot, summarizePortal } from '../src/snapshot.ts'
 import {
   PORTAL_API_PATH,
@@ -103,7 +103,6 @@ describe('AIOps Portal read model', () => {
       sessionQuery: {},
       aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
       aiopsAgents: { listClusters: () => [], configured: () => false },
-      kubernetes: {},
       credentials: { resolve },
       logger: { warn: vi.fn() },
     }
@@ -139,7 +138,7 @@ describe('AIOps Portal read model', () => {
     const ctx: Record<string, unknown> = {
       effect: (setup: () => () => void) => { setup() },
       webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
-      sessionQuery: {}, kubernetes: {}, credentials: { resolve: vi.fn(async () => undefined) },
+      sessionQuery: {}, credentials: { resolve: vi.fn(async () => undefined) },
       aiopsAgents: { listClusters: () => [], configured: () => false },
       aiopsIncidentRouter: { dryRun }, logger: { warn: vi.fn() },
     }
@@ -179,19 +178,6 @@ describe('AIOps Portal read model', () => {
     expect(String(alertmanagerFetch.mock.calls[0]?.[0])).toContain('http://alertmanager:9093/api/v2/alerts?')
   })
 
-  it('tests Kubernetes connectivity and rejects missing diagnosis RBAC', async () => {
-    const testConnection = vi.fn(async () => ({
-      context: 'prod', cluster: 'prod-cluster', namespace: 'payments', server: 'https://cluster',
-      capabilities: { pods: true, events: false, podLogs: false },
-    }))
-    await expect(testPortalConnection({ kubernetes: { testConnection } } as never, {
-      target: 'kubernetes', kubeconfig: '/srv/dsh/.kube/config', context: 'prod',
-    }, new AbortController().signal)).resolves.toMatchObject({
-      ok: false, code: 'rbac_denied', missingPermissions: ['events', 'podLogs'],
-    })
-    expect(testConnection).toHaveBeenCalledWith({ kubeconfig: '/srv/dsh/.kube/config', context: 'prod' }, expect.any(AbortSignal))
-  })
-
   it('rejects invalid URLs, HTTP failures, and responses from the wrong service', async () => {
     await expect(testEndpointConnection('prometheus', 'file:///etc/passwd'))
       .resolves.toMatchObject({ ok: false, code: 'invalid_url' })
@@ -213,7 +199,7 @@ describe('AIOps Portal read model', () => {
     const ctx: Record<string, unknown> = {
       effect: (setup: () => () => void) => { setup() },
       webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
-      sessionQuery: {}, kubernetes: {}, credentials: { resolve: vi.fn(async () => undefined) },
+      sessionQuery: {}, credentials: { resolve: vi.fn(async () => undefined) },
       aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
       aiopsAgents: { listClusters: () => [issued.cluster], configured: () => true, createCluster, reissueToken, revokeCluster, probe },
       logger: { warn: vi.fn() },
@@ -308,7 +294,7 @@ describe('AIOps Portal read model', () => {
     const ctx = {
       aiopsIncidentRouter: {
         workspacePath: '/srv/prod',
-        listControlAudit: () => [{ id: 8, source: 'am', deliveryId: 'd', fingerprint: 'fp', alertname: 'HighLatency', severity: 'critical', outcome: 'completed', reason: 'diagnosed', sessionId: 'aiops-session-1', round: 1, queueDepth: 0, reservedTokens: 0, recordedAt: 1_010, attempt: 1 }],
+        listControlAudit: () => [{ id: 8, source: 'am', deliveryId: 'd', fingerprint: 'fp', alertname: 'HighLatency', severity: 'critical', outcome: 'completed', reason: 'diagnosed', sessionId: 'aiops-session-1', round: 1, cluster: 'prod-sh', queueDepth: 0, reservedTokens: 0, recordedAt: 1_010, attempt: 1 }],
         routingSettings: () => routingSettings,
         listPolicyAudit: () => [],
       },
@@ -333,7 +319,13 @@ describe('AIOps Portal read model', () => {
       needsCluster: false,
     })
     expect(snapshot.incidents).toHaveLength(2)
-    expect(snapshot.incidents[0]).toMatchObject({ sessionId: 'aiops-session-1', revision: 3, updatedAt: 1_000, incident: { title: 'Latest diagnosis' }, lastRoute: { outcome: 'completed' } })
+    expect(snapshot.incidents[0]).toMatchObject({
+      sessionId: 'aiops-session-1',
+      revision: 3,
+      updatedAt: 1_000,
+      incident: { title: 'Latest diagnosis' },
+      lastRoute: { outcome: 'completed', cluster: 'prod-sh' },
+    })
     // Feedback pinned to a superseded revision is dropped rather than shown.
     expect(snapshot.incidents[1]).toMatchObject({ sessionId: 'aiops-session-2' })
     expect(snapshot.incidents[1]?.feedback).toBeUndefined()

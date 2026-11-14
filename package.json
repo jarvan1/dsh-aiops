@@ -40,7 +40,7 @@
   },
   "scripts": {
     "clean": "node scripts/clean.mjs",
-    "build": "pnpm run clean && tsc -p packages/aiops-http-read && tsc -p packages/aiops-observability && tsc -p packages/aiops-alertmanager && tsc -p packages/aiops-prometheus && tsc -p packages/aiops-kubernetes && tsc -p packages/aiops-incident && tsc -p packages/aiops-agents && tsc -p packages/aiops-delivery && tsc -p packages/tool-aiops-observe && tsc -p packages/webhook-alertmanager && tsc -p packages/incident-router && tsc -p packages/tool-aiops-history && tsc -p packages/aiops-portal && node scripts/build-portal.mjs && tsc -p packages/skill-k8s-diag && tsc -p packages/aiops",
+    "build": "pnpm run clean && tsc -p packages/aiops-http-read && tsc -p packages/aiops-observability && tsc -p packages/aiops-alertmanager && tsc -p packages/aiops-prometheus && tsc -p packages/aiops-agents && tsc -p packages/aiops-kubernetes && tsc -p packages/aiops-incident && tsc -p packages/aiops-delivery && tsc -p packages/tool-aiops-observe && tsc -p packages/webhook-alertmanager && tsc -p packages/incident-router && tsc -p packages/tool-aiops-history && tsc -p packages/aiops-portal && node scripts/build-portal.mjs && tsc -p packages/skill-k8s-diag && tsc -p packages/aiops",
     "build:github": "pnpm run build && node scripts/prepare-github.mjs",
     "typecheck": "pnpm run build",
     "test": "pnpm run build && vitest run",
@@ -83,7 +83,6 @@
     "@deepseek-ai/dsh-webhook": "^0.2.2-rc.1",
     "@deepseek-ai/dsh-workspace": "^0.2.2-rc.1",
     "@deepseek-ai/schemastery": "^3.19.0",
-    "@kubernetes/client-node": "2.0.0",
     "ws": "8.21.3",
     "zod": "4.4.3"
   },

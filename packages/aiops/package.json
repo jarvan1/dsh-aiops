@@ -28,6 +28,7 @@
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-aiops-agents": "workspace:^",
     "@deepseek-ai/dsh-aiops-alertmanager": "workspace:^",
     "@deepseek-ai/dsh-aiops-delivery": "workspace:^",
     "@deepseek-ai/dsh-aiops-incident": "workspace:^",

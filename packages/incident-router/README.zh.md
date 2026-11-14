@@ -15,6 +15,8 @@
 - 同一 fingerprint 的待处理通知按 lifecycle status 分组为一次模型 turn；状态不同的通知保持顺序。
 - 进程重启后，处理中工作会恢复为队列项，相同的 SQLite 映射会先恢复已持久化的 Session，再追加下一条通知。
 
+每个轮次绑定一个集群 agent：Router 读取告警的 cluster label（`clusterLabel`，默认 `cluster`），并把名称与轮次一起持久化；label 缺失时回退到 `defaultCluster`，label 值非法时不绑定任何集群，而不是回退。首轮提示会声明绑定的集群，`clusterForSession()` 供观测工具解析该名称，因此一次诊断只能读取它的告警所指集群。升级前已存在的轮次会采纳它看到的第一个可用绑定。
+
 每个符合策略的告警会在创建 Agent 前持久化。Router 按 fingerprint 冷却、全局/分 severity 并发、全局/分 severity Token 预留上限和队列容量决定立即启动、延迟或丢弃；critical 优先，同等级保持 FIFO。每次过滤、分组、延迟、丢弃、启动、完成或失败均写入审计。每个最终被接受的决策都会先写入可忽略的 `aiops/alert-routed` v2 Session 事件，再发送模型可见的 follow-up。事件把 `alert.startsAt` 投影为规范 T0、有界窗口，以及明确的 `prometheus_query_range`、`kubernetes_events` 与 `kubernetes_logs` 时间参数。Session JSONL 仍是诊断叙事；router 数据库拥有 delivery 重放、排队/审计事实以及 fingerprint 到轮次的协调状态；结构化事件状态位于 `aiops_incident` 存储域。
 
 每个模型 turn 都会读取 DSH 持久化的 `locale.preference`，要求 Agent 使用该语言编写面向用户的说明和持久化事件报告文本。Host 偏好未设置或不可用时回退为英文，与 DSH Host 侧 locale fallback 一致；标识符与观测值保持原样。
@@ -25,7 +27,7 @@
 
 ## 配置
 
-`source` 选择一个 adapter 实例。`statePath` 和 `workspacePath` 必须为绝对路径（仅测试状态可使用 `:memory:`）。`agentPreset` 和 `permissionPreset` 控制 Session 组合。`routingPolicy.ignoredAlertnames` 是仅用于已确认噪声的精确匹配列表；空列表接受所有 alertname。`severityMap` 不区分大小写地把 Provider label 映射到 `info`、`warning` 或 `critical`；缺失或未知值使用 `routingPolicy.defaultSeverity`。`modelBudgets` 为每个 severity 设置单次最大输出 token 数。
+`source` 选择一个 adapter 实例。`statePath` 和 `workspacePath` 必须为绝对路径（仅测试状态可使用 `:memory:`）。`agentPreset` 和 `permissionPreset` 控制 Session 组合。`clusterLabel` 指定用于选择集群 agent 的告警 label，必须是 Prometheus 风格的 label 名；`defaultCluster` 是回退的 agent 名称（空表示不设置），设置时必须是合法的小写 DNS label。`routingPolicy.ignoredAlertnames` 是仅用于已确认噪声的精确匹配列表；空列表接受所有 alertname。`severityMap` 不区分大小写地把 Provider label 映射到 `info`、`warning` 或 `critical`；缺失或未知值使用 `routingPolicy.defaultSeverity`。`modelBudgets` 为每个 severity 设置单次最大输出 token 数。
 
 `stormControl` 配置 fingerprint 冷却秒数、队列大小/时效、失败重试次数/退避、全局和分 severity 并发，以及全局和分 severity 的在途模型 Token 预留上限。单次 `modelBudgets` 必须能放入对应的 Token 上限，severity 并发不能超过全局并发。`diagnosisWindow` 设置锚点前后秒数、Prometheus 分辨率秒数，以及写入每个路由事件的 Pod 日志行数上限。
 

@@ -16,7 +16,7 @@ describe('GitHub source installation', () => {
     expect(manifest.name).toBe('dsh-aiops')
     expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
     expect(manifest.scripts?.prepare).toBe('pnpm run build:github')
-    expect(manifest.dependencies?.['@kubernetes/client-node']).toBe('2.0.0')
+    expect(manifest.dependencies?.['ws']).toBe('8.21.3')
   })
 
   it('uses repository-relative plugin artifacts that are all buildable', async () => {

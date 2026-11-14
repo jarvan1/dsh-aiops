@@ -56,7 +56,11 @@ export function resolveLogsRequest(request: KubernetesLogsRequest, limits: LogLi
 export function validateExecutionTarget(target: KubernetesExecutionTarget): KubernetesExecutionTarget {
   const cwd = target.cwd.trim()
   if (cwd === '') throw new KubernetesQueryError('invalid_request', 'cwd must be non-empty.')
-  return { cwd, ...(target.namespace === undefined ? {} : { namespace: argumentValue('namespace', target.namespace) }) }
+  return {
+    cwd,
+    ...(target.cluster === undefined ? {} : { cluster: argumentValue('cluster', target.cluster) }),
+    ...(target.namespace === undefined ? {} : { namespace: argumentValue('namespace', target.namespace) }),
+  }
 }
 
 export function validateTarget(target: KubernetesTarget): KubernetesTarget {
@@ -67,11 +71,6 @@ export function argumentValue(name: string, value: string): string {
   const normalized = value.trim()
   if (normalized === '' || normalized.startsWith('-')) throw new KubernetesQueryError('invalid_request', `${name} must be non-empty and must not start with "-".`)
   return normalized
-}
-
-export function namespaceArgs(namespace: string | undefined): string[] { return namespace === undefined ? [] : ['--namespace', namespace] }
-export function selectorArgs(labelSelector: string | undefined, fieldSelector: string | undefined): string[] {
-  return [...(labelSelector === undefined ? [] : ['--selector', argumentValue('labelSelector', labelSelector)]), ...(fieldSelector === undefined ? [] : ['--field-selector', argumentValue('fieldSelector', fieldSelector)])]
 }
 
 export interface AbsoluteWindow { readonly sinceTime?: string; readonly untilTime?: string; readonly sinceEpochMs?: number; readonly untilEpochMs?: number }
@@ -87,37 +86,4 @@ export function normalizeTimestamp(name: string, value: string): { time: string;
   const normalized = value.trim(); const epochMs = Date.parse(normalized)
   if (normalized === '' || !Number.isFinite(epochMs)) throw new KubernetesQueryError('invalid_request', `${name} must be a valid timestamp.`)
   return { time: new Date(epochMs).toISOString(), epochMs }
-}
-
-export function filterEventList(value: KubernetesReadResult, window?: AbsoluteWindow): KubernetesReadResult {
-  if (value === null || Array.isArray(value) || typeof value !== 'object') throw new KubernetesQueryError('invalid_response', 'Kubernetes Event response must be an object.')
-  const source = value as Record<string, KubernetesReadResult>; const items = source['items']
-  if (!Array.isArray(items)) throw new KubernetesQueryError('invalid_response', 'Kubernetes Event response has no items array.')
-  const sorted = [...items].sort((left, right) => (eventStart(left) ?? 0) - (eventStart(right) ?? 0))
-  return { ...source, items: window === undefined ? sorted : sorted.filter(item => eventOverlaps(item, window)) }
-}
-
-function eventOverlaps(value: KubernetesReadResult, window: AbsoluteWindow): boolean {
-  if (value === null || Array.isArray(value) || typeof value !== 'object') return false
-  const event = value as Record<string, KubernetesReadResult>; const metadata = objectValue(event['metadata']); const series = objectValue(event['series'])
-  const start = firstTimestamp(event['firstTimestamp'], metadata?.['creationTimestamp'], event['eventTime'])
-  const end = firstTimestamp(series?.['lastObservedTime'], event['lastTimestamp'], event['eventTime'], start)
-  if (start === undefined || end === undefined) return false
-  return (window.sinceEpochMs === undefined || end >= window.sinceEpochMs) && (window.untilEpochMs === undefined || start <= window.untilEpochMs)
-}
-function eventStart(value: KubernetesReadResult): number | undefined {
-  if (value === null || Array.isArray(value) || typeof value !== 'object') return undefined
-  const event = value as Record<string, KubernetesReadResult>
-  return firstTimestamp(event['firstTimestamp'], objectValue(event['metadata'])?.['creationTimestamp'], event['eventTime'])
-}
-function objectValue(value: KubernetesReadResult | undefined): Record<string, KubernetesReadResult> | undefined {
-  return value !== null && value !== undefined && !Array.isArray(value) && typeof value === 'object' ? value as Record<string, KubernetesReadResult> : undefined
-}
-function firstTimestamp(...values: (KubernetesReadResult | number | undefined)[]): number | undefined {
-  for (const value of values) { if (typeof value === 'number' && Number.isFinite(value)) return value; if (typeof value === 'string') { const parsed = Date.parse(value); if (Number.isFinite(parsed)) return parsed } }
-  return undefined
-}
-export function filterTimestampedLogLines(output: string, untilTime: string): string {
-  const untilEpochMs = normalizeTimestamp('untilTime', untilTime).epochMs
-  return output.split(/(?<=\n)/u).filter(line => { const separator = line.indexOf(' '); if (separator <= 0) return false; const parsed = Date.parse(line.slice(0, separator)); return Number.isFinite(parsed) && parsed <= untilEpochMs }).join('')
 }

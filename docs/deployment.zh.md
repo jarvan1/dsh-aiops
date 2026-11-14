@@ -67,6 +67,16 @@ curl -s -X POST http://127.0.0.1:3081/alertmanager \
 
 canary 会走完整链路：认证 ingress → 路由轮次 → 确定性诊断 Session（profile 内需已配置模型）→ `aiops_incident_report` → `aiops_incident` 存储域 → 推送 → IM 会话消息加一条 `aiops_delivery` `delivered` 标记。诊断质量依赖 Prometheus/Alertmanager/Kubernetes 连通性，但 delivery 冒烟只需要模型产出事件报告。切换 provider 直接在设置中改 `provider`；轮换 IM webhook token 只需更新凭证值——投递每次尝试都重新解析，无需重启。
 
+## 集群接入
+
+Kubernetes 证据不再通过 Host 侧 kubeconfig 读取。每个集群（包括运行 DSH 的那个）都安装 [`agent/`](../agent/README.zh.md) 中的 Go agent，并在 Portal 中注册：
+
+1. 打开 AIOps 视图 → **集群** → 为集群名创建令牌（在 agent 连接前状态为 `pending`）。
+2. 部署 `agent/deploy/rbac.yaml` 与 Deployment，`AIOPS_AGENT_NAME` 设为该名称，`AIOPS_AGENT_SERVER` 设为**从集群内部**可访问的 `/api/aiops/agent` 地址。
+3. 让告警携带集群名。incident router 默认读取 `cluster` 告警 label（`aiops-incident-router` 条目的 `clusterLabel`），把每个轮次绑定到该 agent；观测工具随后只读取该集群。`AIOPS_DEFAULT_CLUSTER`（router 与 `aiops-kubernetes` 共用）用于没有该 label 的告警；留空可让未标注集群的告警显式退化为 Alertmanager/Prometheus 证据，而不是读取默认集群。
+
+server 不持有任何集群凭据。在 Portal 中吊销集群会立即断开其在线 agent；只有从未连接过的集群才能重签令牌。零集群时 `/api/aiops/readyz` 仍为 ready，并报告 `components.clusters` 与 `configured`/`total`/`connected`。
+
 ## 容器镜像
 
 仓库自带多阶段 `Dockerfile`：在 `node:24-slim` 上构建 GitHub 源码 bundle，构建期预置 DSH Web profile，并由 `docker-entrypoint.sh` 启动——容器首次启动无需网络。Session、SQLite 存储、设置和 `.credentials.yaml` 全部位于 `DSH_HOME` 卷（`/data`）：

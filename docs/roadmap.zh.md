@@ -2,7 +2,7 @@
 
 [English](roadmap.md) | 中文
 
-更新时间：2026-09-08
+更新时间：2026-11-14
 
 ## 已完成
 
@@ -18,11 +18,14 @@
 - 阶段 F.3.2：新增第十三个包，提供精确存活检查、组件感知的就绪检查和低基数 Prometheus 指标。Alertmanager 入口与事件 Router 发布有界 webhook 结果、队列深度/时效、分组/延迟/丢弃工作、活动诊断、调度失败、模型 Token 预留和固定桶诊断延迟，不使用告警派生标签。
 - 阶段 F.3.3：新增带显式安全门槛的运行器，在独立 k3s namespace 创建和清理 Prometheus Operator 规则、AlertmanagerConfig、经 stdin 提交的 bearer Secret 与 CrashLoop Pod；执行 receiver 矩阵，并验证路由审计、Session/报告证据、重试、生命周期、风暴控制和重启恢复。filtered `Watchdog` 探针证明真实 Prometheus → Alertmanager → 认证 receiver 链路。
 - 阶段 F.3.4：Portal 现可管理版本化实时路由设置，包括噪声排除、severity 归一/默认值、冷却、队列/重试、并发与 Token 预算。候选策略必须先通过无副作用的标准化 label dry-run，再以 revision fence 原子保存；每次提交均持久审计。
+- 阶段 F.4（M2）：Kubernetes 访存改为只走 agent。新增 `aiops-agents` 包拥有集群注册表、一次性令牌与 `/api/aiops/agent` WebSocket 网关；每个告警轮次按 `cluster` label 绑定集群 agent，观测工具透传该绑定，因此一次诊断无法读取其他集群。原生 kubeconfig Provider、kubectl 兼容子路径、`KUBECONFIG`/`KUBERNETES_CONTEXT` 默认值以及 Portal 的 Kubernetes 凭据表单均已移除；集群连通性改为 Portal 中的 agent 探测。
 - 阶段 F.3.5：移除 Portal 凭据披露；浏览器 POST 探测拒绝跨站请求；补充部署方 TLS、Host 认证、轮换、迁移、保留和发布流程。旧 allowlist schema 可用安全默认值和弃用警告启动，并以隔离 DSH profile 验证支持版本上的全新安装、启动、重启、密钥轮换与卸载。
 
 阶段 D 默认验证覆盖 17 个通过的测试文件和 108 个通过的测试，另有一个按需真实集群测试，并通过 skill 结构校验、相对文档链接、全部十一个 package tarball，以及隔离 DSH Web profile 的安装、配置 dump、真实启动和卸载检查。真实演练使用产品 Kubernetes Provider 读取一个现有 CrashLoopBackOff Pod、绝对窗口 Event、当前与 previous 有界日志，全程没有修改集群。
 
 阶段 E 默认验证覆盖 17 个通过的测试文件和 118 个通过的测试，另有一个按需真实集群测试；完整 TypeScript 构建、相对文档链接、bundle tarball，以及四个受影响 package 的 tarball 内容检查均通过。
+
+阶段 F.4 验证覆盖令牌签发与吊销、网关认证与握手拒绝、按轮次的集群绑定与提示词说明、历史轮次回填、agent 版 Provider（集群解析、请求整形、错误映射、探测）、Portal 集群路由，以及零集群 readiness。默认套件通过 26 个测试文件、199 个测试；跨语言冒烟用真实 Go agent 连接真实 server 网关。带门槛的 k3s 矩阵现在会部署并吊销真实 agent。
 
 阶段 F 默认验证覆盖 19 个通过的测试文件和 128 个通过的测试，另有一个按需真实集群测试；完整 TypeScript 构建、Portal Host/Web 双产物、自包含 Host 入口回归、全局侧边栏/会话视图注册回归、Provider 实时设置测试、相对文档链接、Portal 与 bundle 的 tarball 内容检查，以及不提供数据源环境变量的隔离 DSH Web profile 真实启动和 Portal API 读取均通过。
 

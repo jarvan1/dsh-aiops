@@ -6,6 +6,9 @@ const mode = process.argv[2]
 const namespace = process.env.AIOPS_E2E_NAMESPACE || 'aiops-e2e'
 const context = process.env.AIOPS_E2E_CONTEXT
 const runId = process.env.AIOPS_E2E_RUN_ID || 'local'
+// The committed agent RBAC names this namespace, so the E2E uses it as-is.
+const agentNamespace = 'aiops'
+const clusterName = process.env.AIOPS_E2E_CLUSTER || `e2e-${runId}`.toLowerCase()
 
 function fail(message) { process.stderr.write(`aiops-e2e: ${message}\n`); process.exit(1) }
 function required(name) { const value = process.env[name]; if (!value) fail(`${name} is required`); return value }
@@ -20,6 +23,7 @@ function ensureGuard() {
   if (process.env.AIOPS_E2E_CONFIRM !== 'local-test-only') fail('set AIOPS_E2E_CONFIRM=local-test-only for this deliberately disruptive fixture')
   if (!context || !/^[A-Za-z0-9._:@/-]{1,256}$/.test(context)) fail('AIOPS_E2E_CONTEXT must explicitly name the test cluster context')
   if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(namespace)) fail('AIOPS_E2E_NAMESPACE must be a DNS label')
+  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(clusterName) || clusterName.length > 63) fail('AIOPS_E2E_CLUSTER must be a DNS label of at most 63 characters')
   if (!/^[A-Za-z0-9._-]{1,48}$/.test(runId)) fail('AIOPS_E2E_RUN_ID has invalid characters')
 }
 function kubectl(args, input) {
@@ -32,6 +36,89 @@ function kubectlOutput(args) {
   if (result.status !== 0) fail((result.stderr || `kubectl ${args[0]} failed`).trim())
   return (result.stdout || '').trim()
 }
+/** Issue the agent token through the Portal API so no secret is ever typed in. */
+async function issueClusterToken() {
+  const portal = exactUrl('AIOPS_E2E_PORTAL_URL')
+  const url = new URL('/api/aiops/portal/clusters', portal)
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ name: clusterName }),
+  })
+  if (response.status === 409) fail(`cluster ${clusterName} already has a token; revoke it or use a new AIOPS_E2E_RUN_ID`)
+  if (!response.ok) fail(`Portal cluster creation returned HTTP ${response.status}`)
+  const body = await response.json()
+  if (typeof body.token !== 'string' || !body.token.startsWith('dsha_')) fail('Portal did not return an agent token')
+  return body.token
+}
+
+function agentFixture(image, server, token) {
+  return `apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${agentNamespace}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aiops-agent-token
+  namespace: ${agentNamespace}
+type: Opaque
+stringData:
+  token: ${JSON.stringify(token)}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-agent
+  namespace: ${agentNamespace}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aiops-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aiops-agent
+    spec:
+      serviceAccountName: aiops-agent
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: agent
+          image: ${image}
+          args: ["--token-file=/var/run/aiops/token"]
+          env:
+            - name: AIOPS_AGENT_SERVER
+              value: ${JSON.stringify(server)}
+            - name: AIOPS_AGENT_NAME
+              value: ${JSON.stringify(clusterName)}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: token
+              mountPath: /var/run/aiops
+              readOnly: true
+      volumes:
+        - name: token
+          secret:
+            secretName: aiops-agent-token
+            defaultMode: 0444
+`
+}
+
 function namespaceFixture() {
   return `apiVersion: v1\nkind: Namespace\nmetadata:\n  name: ${namespace}\n`
 }
@@ -160,7 +247,7 @@ async function exercise() {
   const webhook = exactUrl('AIOPS_E2E_WEBHOOK_URL')
   const secret = required('AIOPS_E2E_WEBHOOK_SECRET')
   if (secret.length < 16) fail('AIOPS_E2E_WEBHOOK_SECRET must contain at least 16 characters')
-  await post(webhook, secret, 'kubernetes', delivery('KubePodCrashLooping', 'firing', { namespace, pod: 'crashloop-webhook-test', container: 'crashloop-webhook-test', severity: 'critical' }))
+  await post(webhook, secret, 'kubernetes', delivery('KubePodCrashLooping', 'firing', { namespace, pod: 'crashloop-webhook-test', container: 'crashloop-webhook-test', severity: 'critical', cluster: clusterName }))
   await post(webhook, secret, 'target-down', delivery('TargetDown', 'firing', { job: 'synthetic-unreachable', severity: 'warning' }))
   await post(webhook, secret, 'missing-severity', delivery('ArbitraryMissingSeverity', 'firing', { service: 'checkout' }))
   await post(webhook, secret, 'vendor-severity', delivery('ArbitraryVendorSignal', 'firing', { service: 'legacy-db', severity: 'page' }))
@@ -195,6 +282,9 @@ async function verify() {
     await new Promise(resolve => setTimeout(resolve, 2000))
   }
   if (!snapshot) fail('Portal returned no snapshot')
+  if (!(snapshot.clusters || []).some(row => row.name === clusterName && row.status === 'connected')) {
+    fail(`cluster agent ${clusterName} is not connected in the Portal; install it before verifying`)
+  }
   const audit = snapshot.audit || []
   const missing = expected.filter(id => !audit.some(row => row.deliveryId === id))
   if (missing.length) fail(`route audit is missing deliveries: ${missing.join(', ')}`)
@@ -243,7 +333,15 @@ else if (mode === 'seed-restart') {
   process.stdout.write(`aiops-e2e: restart recovery observed for ${runId}\n`)
 } else if (mode === 'cleanup') {
   kubectl(['delete', 'namespace', namespace, '--ignore-not-found=true'], 'y\n')
+  kubectl(['delete', 'namespace', agentNamespace, '--ignore-not-found=true'], 'y\n')
+  kubectl(['delete', '-f', 'agent/deploy/rbac.yaml', '--ignore-not-found=true'], 'y\n')
+  const revoke = new URL('/api/aiops/portal/clusters/revoke', exactUrl('AIOPS_E2E_PORTAL_URL'))
+  await fetch(revoke, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({ name: clusterName }),
+  }).catch(() => {})
   const remaining = spawnSync('kubectl', ['--context', context, 'get', 'namespace', namespace], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   if (remaining.status === 0) fail(`namespace ${namespace} still exists after cleanup`)
-  process.stdout.write(`aiops-e2e: namespace ${namespace} removed\n`)
+  process.stdout.write(`aiops-e2e: namespace ${namespace} and agent namespace ${agentNamespace} removed\n`)
 } else fail('usage: node scripts/aiops-e2e.mjs <setup|exercise|verify|seed-restart|verify-restart|cleanup>')

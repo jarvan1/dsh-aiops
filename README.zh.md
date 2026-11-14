@@ -52,13 +52,13 @@ pnpm run pack:bundle
 DSH_HOME=/path/to/profile-home pnpm dsh plugin --profile web add link:/path/to/dsh-aiops/packages/aiops
 ```
 
-GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可以从 registry 安装 `@deepseek-ai/dsh-aiops`。两种形式都会把 AIOps patch 添加到 profile 的 base 与应用层之后。`PROMETHEUS_URL`、`ALERTMANAGER_URL`、`KUBECONFIG` 和 `KUBERNETES_CONTEXT` 是可选的组合层默认值，也可以在 AIOps 数据源设置中实时保存或覆盖；`AIOPS_WORKSPACE` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` 凭据用于配置自动化工作流。Webhook listener 默认位于 `127.0.0.1:3081/alertmanager`；当 Alertmanager 无法访问该回环地址时，用 `AIOPS_WEBHOOK_PUBLIC_URL` 设置它应使用的地址。Kubernetes 使用官方 Node 客户端和部署侧只读 kubeconfig 凭据，不要求安装 `kubectl`。
+GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可以从 registry 安装 `@deepseek-ai/dsh-aiops`。两种形式都会把 AIOps patch 添加到 profile 的 base 与应用层之后。`PROMETHEUS_URL` 和 `ALERTMANAGER_URL` 是可选的组合层默认值，也可以在 AIOps 数据源设置中实时保存或覆盖；`AIOPS_DEFAULT_CLUSTER` 为没有集群 label 的告警设置回退集群 agent。`AIOPS_WORKSPACE` 和 `AIOPS_ALERTMANAGER_WEBHOOK_SECRET` 凭据用于配置自动化工作流。Webhook listener 默认位于 `127.0.0.1:3081/alertmanager`；当 Alertmanager 无法访问该回环地址时，用 `AIOPS_WEBHOOK_PUBLIC_URL` 设置它应使用的地址。Kubernetes 读取通过已注册的集群 agent 执行；Host 不需要 kubeconfig，也不需要 `kubectl`。
 
-在 Web profile 中，左侧栏底部始终显示 `AIOps` 入口，可以从任意页面打开全局 Portal；非空 Session 中仍保留 `AIOps` 会话标签。Portal 固定读取 `AIOPS_WORKSPACE`，不会以当前聊天 Session 的工作区扩大查询范围。Prometheus/Alertmanager URL 以及服务端 kubeconfig 路径/context 会写入 DSH 用户设置并立即生效。三个数据源都必须通过连通性测试，Kubernetes 还会验证最低只读 RBAC 权限。
+在 Web profile 中，左侧栏底部始终显示 `AIOps` 入口，可以从任意页面打开全局 Portal；非空 Session 中仍保留 `AIOps` 会话标签。Portal 固定读取 `AIOPS_WORKSPACE`，不会以当前聊天 Session 的工作区扩大查询范围。Prometheus/Alertmanager URL 会写入 DSH 用户设置并立即生效，两者都必须通过连通性探测。Kubernetes 的连通性是**集群**页中的 agent 探测。
 
 同一工作台还可管理版本化路由策略。粘贴的标准化 label 必须先完成 dry-run，才能以 settings revision fence 原子保存完整策略；变更立即生效并持久审计。Webhook 凭据始终留在服务端，Portal 只返回是否已配置。
 
-多集群接入使用安装在每个集群内、只主动向外连接的 Go agent。AIOPS Portal 为每个集群签发一个令牌（仅展示一次，服务端只保留摘要），agent 连接 server 并用它证明集群身份，server 跟踪 `pending`/`connected`/`offline`/`revoked` 状态且从不持有集群凭据。诊断读取目前仍使用内置 kubeconfig Provider，直到 agent 版 Provider 落地；升级仍是手动发布的镜像滚动。参见 [agent 说明](agent/README.zh.md)、[协议](agent/docs/protocol.zh.md)与 [server 网关](packages/aiops-agents/README.zh.md)。
+多集群接入使用安装在每个集群内、只主动向外连接的 Go agent。AIOPS Portal 为每个集群签发一个令牌（仅展示一次，服务端只保留摘要），agent 连接 server 并用它证明集群身份，server 跟踪 `pending`/`connected`/`offline`/`revoked` 状态且从不持有集群凭据。诊断读取通过所选 agent 执行：router 按告警的 `cluster` label 把每个轮次绑定到集群，Host 侧 kubeconfig Provider 已删除；升级仍是手动发布的镜像滚动。参见 [agent 说明](agent/README.zh.md)、[协议](agent/docs/protocol.zh.md)与 [server 网关](packages/aiops-agents/README.zh.md)。
 
 Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，Host/TLS/轮换边界见[生产部署与升级](docs/deployment.zh.md)，真实集群验证见[可重复 Alertmanager/k3s 矩阵](deploy/alertmanager/README.zh.md)，已完成与后续阶段见[路线图](docs/roadmap.zh.md)，重要变更见 [Changelog](CHANGELOG.md)。
 

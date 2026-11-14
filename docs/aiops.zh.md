@@ -11,14 +11,14 @@ Alertmanager POST /alertmanager
              -> Bearer 认证 + 有界 v4 标准化
              -> ctx.webhookRuntime
              -> 持久队列 / fingerprint 分组 / 冷却 / 资源预算
-             -> fingerprint / 告警轮次 router
+             -> fingerprint / 告警轮次 router + 按告警 label 绑定集群
              -> startsAt 锚点 + 有界绝对查询窗口
              -> 确定性诊断 Session
              -> 加载 aiops-diag
                               |
 alertmanager_alerts -> ctx.alertmanager -> Alertmanager HTTP API v2
 prometheus_query*   -> ctx.prometheus   -> Prometheus HTTP API
-kubernetes_*        -> ctx.kubernetes   -> 原生 kubeconfig 客户端 -> Kubernetes API
+kubernetes_*        -> ctx.kubernetes   -> 绑定到本轮次的集群 agent -> Kubernetes API
              evidence + hypotheses + recommendations
                               |
                  aiops_incident_report
@@ -63,17 +63,17 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 | 告警投递 | [`dsh-webhook-alertmanager`](../packages/webhook-alertmanager/README.zh.md)、隔离 HTTP listener、`ctx.webhookRuntime` | [`dsh-aiops-incident-router`](../packages/incident-router/README.zh.md)、`ctx.aiopsIncidentRouter` |
 | Alertmanager 告警 | [`dsh-aiops-alertmanager`](../packages/aiops-alertmanager/README.zh.md)、`ctx.alertmanager`、HTTP API v2 | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `alertmanager_alerts` |
 | Prometheus 观测 | [`dsh-aiops-prometheus`](../packages/aiops-prometheus/README.zh.md)、`ctx.prometheus`、有界 HTTP 查询/发现 API | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `prometheus_query`、`prometheus_query_range`、`prometheus_rules`、`prometheus_targets`、`prometheus_discovery` |
-| Kubernetes 读取 | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.zh.md)、`ctx.kubernetes`、官方原生 API 客户端（另有可选 kubectl 兼容子路径） | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `kubernetes_get`、`kubernetes_list`、`kubernetes_events`、`kubernetes_logs` |
+| Kubernetes 读取 | [`dsh-aiops-kubernetes`](../packages/aiops-kubernetes/README.zh.md)、`ctx.kubernetes`、经 `ctx.aiopsAgents` 的类型化读取（Host 无 kubeconfig） | [`dsh-tool-aiops-observe`](../packages/tool-aiops-observe/README.zh.md) 中的 `kubernetes_get`、`kubernetes_list`、`kubernetes_events`、`kubernetes_logs` |
 | 诊断流程 | 全局注册的随包 [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.zh.md) | `aiops-diag` 动态选择 Alertmanager、Prometheus、服务与 Kubernetes 证据分支 |
 | 运维 Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.zh.md)、固定同源 `/api/aiops/portal` | DSH Web 常驻侧边栏入口、Session 视图、实时数据源/路由设置与 dry-run |
 | 产品自观测 | [`dsh-aiops-observability`](../packages/aiops-observability/README.zh.md)、`ctx.aiopsTelemetry` | `/api/aiops/healthz`、`/api/aiops/readyz` 与低基数 `/api/aiops/metrics` |
-| 集群 agent | [`dsh-aiops-agents`](../packages/aiops-agents/README.zh.md)、`ctx.aiopsAgents`、`/api/aiops/agent` WebSocket | Portal 集群管理，以及后续的 agent 版 `KubernetesRuntime`（M2） |
+| 集群 agent | [`dsh-aiops-agents`](../packages/aiops-agents/README.zh.md)、`ctx.aiopsAgents`、`/api/aiops/agent` WebSocket | Portal 集群管理，以及 agent 版的 `ctx.kubernetes` 读取 |
 
 每个 capability 都把 Service Definition 与当前 Provider 合并在一个包中，因为它们目前作为同一关注点演进。出现第二种传输或远程执行 Provider 时再拆分 Provider 包；Consumer 已经只依赖抽象 Service。
 
 ## 多集群接入
 
-每个集群（包括运行 DSH 的那个）都通过只主动向外连接的 Go agent 读取，而不是 Host 侧的 kubeconfig。Portal 为每个集群签发一个令牌并只展示一次；`aiops_agent` 存储域只保留其 SHA-256 摘要、末四位、时间戳与最近上报的 agent 版本。agent 连接 `/api/aiops/agent`，用该令牌认证，并声明名称、版本与能力集；server 将名称绑定到令牌，跟踪 `pending`/`connected`/`offline`/`revoked` 状态，并在这条连接上执行类型化的 `get`/`list`/`events`/`logs` 读取与 `probe`。不存在 path、URL、verb 或 exec 透传，server 也不持有任何集群凭据。全新安装在没有集群的情况下正常启动，绝不生成或记录令牌，并在 Portal 中显示首次配置提示；agent 的 server 地址始终显式配置，且必须能从集群内部访问。诊断工具在 M2 之前仍走原生 Provider。参见[决策记录](decisions/2026-11-14-aiops-cluster-agent-gateway.zh.md)与 [agent 指南](../agent/README.zh.md)。
+每个集群（包括运行 DSH 的那个）都通过只主动向外连接的 Go agent 读取，而不是 Host 侧的 kubeconfig。Portal 为每个集群签发一个令牌并只展示一次；`aiops_agent` 存储域只保留其 SHA-256 摘要、末四位、时间戳与最近上报的 agent 版本。agent 连接 `/api/aiops/agent`，用该令牌认证，并声明名称、版本与能力集；server 将名称绑定到令牌，跟踪 `pending`/`connected`/`offline`/`revoked` 状态，并在这条连接上执行类型化的 `get`/`list`/`events`/`logs` 读取与 `probe`。不存在 path、URL、verb 或 exec 透传，server 也不持有任何集群凭据。全新安装在没有集群的情况下正常启动，绝不生成或记录令牌，并在 Portal 中显示首次配置提示；agent 的 server 地址始终显式配置，且必须能从集群内部访问。诊断工具通过该 agent 读取：router 把每个轮次绑定到告警 `cluster` label 指定的集群（router 上的 `clusterLabel`/`defaultCluster`），观测工具透传该绑定，因此一次诊断无法读取其他集群。未知或非法的 label 不绑定任何集群，Kubernetes 证据会显式失败，而不是回退到默认集群。参见[决策记录](decisions/2026-11-14-aiops-cluster-agent-gateway.zh.md)与 [agent 指南](../agent/README.zh.md)。
 
 ## 事件状态
 
@@ -93,7 +93,7 @@ RAG 暂缓，因为该闭环从实时运维状态进行诊断，目前还没有�
 
 ## 安全边界
 
-该包组不包含 Alertmanager 写入、Kubernetes 变更、exec、任意命令、流式日志跟随、自动修复或绕过审批的路径。Portal 永不返回 webhook bearer 明文，只暴露 URL 和是否已配置；连接测试与 dry-run POST 会拒绝跨站浏览器请求。部署仍负责 DSH Host 认证边界、TLS 与反向代理 header、网络 ACL、Alertmanager/Prometheus 访问、kubeconfig、凭据轮换及只读 Kubernetes RBAC。详见[生产部署与升级](deployment.zh.md)。
+该包组不包含 Alertmanager 写入、Kubernetes 变更、exec、任意命令、流式日志跟随、自动修复或绕过审批的路径。Portal 永不返回 webhook bearer 明文，只暴露 URL 和是否已配置；连接测试与 dry-run POST 会拒绝跨站浏览器请求。部署仍负责 DSH Host 认证边界、TLS 与反向代理 header、网络 ACL、Alertmanager/Prometheus 访问、agent 令牌签发与吊销，以及 agent 运行时使用的只读 Kubernetes RBAC。详见[生产部署与升级](deployment.zh.md)。
 
 ## 当前限制
 
@@ -183,7 +183,7 @@ abstract resolveLogs(request: KubernetesLogsRequest): KubernetesLogsSpec
  */
 abstract logs(spec: KubernetesLogsSpec, signal?: AbortSignal): Promise<KubernetesLogsResult>
 
-/** 验证 kubeconfig/API 连通性与诊断所需只读权限。 */
+/** 探测集群 agent 并报告其能力。 */
 abstract testConnection(spec: KubernetesConnectionSpec, signal?: AbortSignal): Promise<KubernetesConnectionResult>
 ```
 

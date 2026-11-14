@@ -48,6 +48,23 @@ function executionCwd(exec: ToolExecution): string {
   return cwd
 }
 
+/**
+ * Cluster bound to this diagnosis by the incident router. The Provider falls
+ * back to its configured default when the session is not a routed diagnosis;
+ * `undefined` keeps that fallback available.
+ */
+function executionCluster(ctx: Context, exec: ToolExecution): string | undefined {
+  const sessionId = exec.agent?.session.id
+  if (sessionId === undefined) return undefined
+  const router = ctx.get('aiopsIncidentRouter') as { clusterForSession?: (sessionId: string) => string | undefined } | undefined
+  return router?.clusterForSession?.(sessionId)
+}
+
+function clusterArg(ctx: Context, exec: ToolExecution): { cluster?: string } {
+  const cluster = executionCluster(ctx, exec)
+  return cluster === undefined ? {} : { cluster }
+}
+
 /** Register the stable observation tool set against provider-neutral services. */
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
@@ -189,20 +206,26 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'kubernetes_get',
-    description: 'Read one named Kubernetes object as JSON through the configured context. This tool cannot create, patch, delete, exec, or stream logs.',
+    description: 'Read one named Kubernetes object as JSON through the cluster agent bound to this diagnosis. This tool cannot create, patch, delete, exec, or stream logs.',
     parameters: {
       resource: { type: 'string', required: true, description: 'Resource kind or plural resource name.' },
       name: { type: 'string', required: true, description: 'Exact object name.' },
       namespace: { type: 'string', description: 'Namespace; omit to use the configured context default.' },
     },
     output: { schema: { type: 'json' }, render: renderJson },
-    execute: (args, exec) => ctx.kubernetes.get({ cwd: executionCwd(exec), ...args }, exec.signal),
+    execute: (args, exec) => ctx.kubernetes.get({
+      cwd: executionCwd(exec),
+      resource: args.resource,
+      name: args.name,
+      ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
+      ...clusterArg(ctx, exec),
+    }, exec.signal),
     presentCall: args => ({ card: 'generic', title: 'Read Kubernetes object', kind: 'read', rawInput: args }),
   }))
 
   ctx.tools.register(defineTool({
     name: 'kubernetes_list',
-    description: 'List Kubernetes objects as JSON through the configured context, optionally using label and field selectors. This tool is read-only.',
+    description: 'List Kubernetes objects as JSON through the cluster agent bound to this diagnosis, optionally using label and field selectors. This tool is read-only.',
     parameters: {
       resource: { type: 'string', required: true, description: 'Resource kind or plural resource name.' },
       namespace: { type: 'string', description: 'Namespace; omit to use the configured context default.' },
@@ -213,6 +236,7 @@ export function apply(ctx: Context): void {
     execute: (args, exec) => ctx.kubernetes.list({
       cwd: executionCwd(exec),
       resource: args.resource,
+      ...clusterArg(ctx, exec),
       ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
       ...(args.label_selector === undefined ? {} : { labelSelector: args.label_selector }),
       ...(args.field_selector === undefined ? {} : { fieldSelector: args.field_selector }),
@@ -233,6 +257,7 @@ export function apply(ctx: Context): void {
     output: { schema: { type: 'json' }, render: renderJson },
     execute: (args, exec) => ctx.kubernetes.events({
       cwd: executionCwd(exec),
+      ...clusterArg(ctx, exec),
       ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
       ...(args.label_selector === undefined ? {} : { labelSelector: args.label_selector }),
       ...(args.field_selector === undefined ? {} : { fieldSelector: args.field_selector }),
@@ -259,6 +284,7 @@ export function apply(ctx: Context): void {
     output: { schema: { type: 'string' }, render: renderText },
     execute: (args, exec) => ctx.kubernetes.logs(ctx.kubernetes.resolveLogs({
       cwd: executionCwd(exec),
+      ...clusterArg(ctx, exec),
       pod: args.pod,
       ...(args.namespace === undefined ? {} : { namespace: args.namespace }),
       ...(args.container === undefined ? {} : { container: args.container }),

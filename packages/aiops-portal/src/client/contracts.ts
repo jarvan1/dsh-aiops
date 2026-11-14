@@ -16,11 +16,6 @@ export interface EndpointSettings {
   readonly baseUrl: string
 }
 
-export interface KubernetesSettings {
-  readonly kubeconfig: string
-  readonly context: string
-}
-
 /** DSH 0.2.x serves policy fields through the router plugin entry's Config. */
 export type RouterPolicySettings = Omit<RoutingSettings, 'version'>
 
@@ -40,6 +35,5 @@ export interface PortalViewInjected {
   clusterActions: ClusterActions
   prometheusSettings: ConfigForm<EndpointSettings>
   alertmanagerSettings: ConfigForm<EndpointSettings>
-  kubernetesSettings: ConfigForm<KubernetesSettings>
   routingSettings: ConfigForm<RouterPolicySettings>
 }

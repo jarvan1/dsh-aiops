@@ -41,7 +41,7 @@ describe('AIOps Portal client registration', () => {
     apply(ctx as never)
 
     expect(inject).toEqual(['slots', 'locale', 'configForms'])
-    expect(ctx.configForms.get).toHaveBeenCalledTimes(4)
+    expect(ctx.configForms.get).toHaveBeenCalledTimes(3)
     expect(registrations[0]?.options).toMatchObject({
       name: 'conversation.view',
       id: 'aiops',
@@ -62,7 +62,7 @@ describe('AIOps Portal client registration', () => {
     ])
   })
 
-  it('requires successful tests for all three data sources before enabling save', async () => {
+  it('requires successful tests for both data sources before enabling save', async () => {
     Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true)
     const scope = () => {
       const snapshot = { status: 'ready', value: { baseUrl: '' }, revision: 0, writable: true, mode: 'host' } as const
@@ -76,14 +76,7 @@ describe('AIOps Portal client registration', () => {
     }
     const prometheusSettings = scope()
     const alertmanagerSettings = scope()
-    const kubernetesSnapshot = { status: 'ready', value: { kubeconfig: '', context: '' }, revision: 0, writable: true, mode: 'host' } as const
-    const kubernetesSettings = {
-      ...scope(),
-      getSnapshot: () => kubernetesSnapshot,
-    }
-    const testConnection = vi.fn(async (request: { target: string }) => request.target === 'kubernetes'
-      ? { ok: true, latencyMs: 3, kubernetes: { context: 'prod', cluster: 'prod', namespace: 'default', server: 'https://cluster' } } as const
-      : { ok: true, latencyMs: 3 } as const)
+    const testConnection = vi.fn(async () => ({ ok: true, latencyMs: 3 }) as const)
     const loadWebhookConfiguration = vi.fn(async () => ({
       version: 2 as const,
       url: 'http://dsh-host:3081/alertmanager',
@@ -97,7 +90,6 @@ describe('AIOps Portal client registration', () => {
       root.render(createElement(ConnectionSettings, {
         prometheusSettings: prometheusSettings as never,
         alertmanagerSettings: alertmanagerSettings as never,
-        kubernetesSettings: kubernetesSettings as never,
         loadWebhookConfiguration,
         testConnection,
         t: t as never,
@@ -125,9 +117,8 @@ describe('AIOps Portal client registration', () => {
       const tests = [...container.querySelectorAll('button')].filter(value => value.textContent === 'testConnection')
       tests[0]?.click()
       tests[1]?.click()
-      tests[2]?.click()
     })
-    expect(testConnection).toHaveBeenCalledTimes(3)
+    expect(testConnection).toHaveBeenCalledTimes(2)
     expect(button('save').disabled).toBe(false)
 
     await act(async () => { root.unmount() })

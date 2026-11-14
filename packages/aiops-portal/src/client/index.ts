@@ -5,7 +5,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ConfigForm } from '@deepseek-ai/dsh-client-ui-settings/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { en, NS, zh } from './locales.ts'
-import type { EndpointSettings, KubernetesSettings, PortalViewInjected, RouterPolicySettings } from './contracts.ts'
+import type { EndpointSettings, PortalViewInjected, RouterPolicySettings } from './contracts.ts'
 import { AIOpsSidebarAction } from './AIOpsSidebarAction.tsx'
 import {
   createPortalCluster,
@@ -29,7 +29,6 @@ export function apply(ctx: Context): void {
   // through the shared describe mirror and writes with a revision fence.
   const prometheusSettings: ConfigForm<EndpointSettings> = ctx.configForms.get<EndpointSettings>('aiops-prometheus')
   const alertmanagerSettings: ConfigForm<EndpointSettings> = ctx.configForms.get<EndpointSettings>('aiops-alertmanager')
-  const kubernetesSettingsScope: ConfigForm<KubernetesSettings> = ctx.configForms.get<KubernetesSettings>('aiops-kubernetes')
   const routingSettingsScope: ConfigForm<RouterPolicySettings> = ctx.configForms.get<RouterPolicySettings>('aiops-incident-router')
   const injectPortal = (): PortalViewInjected => ({
     loadSnapshot: fetchPortalSnapshot,
@@ -44,7 +43,6 @@ export function apply(ctx: Context): void {
     },
     prometheusSettings,
     alertmanagerSettings,
-    kubernetesSettings: kubernetesSettingsScope,
     routingSettings: routingSettingsScope,
   })
   ctx.slots.inject('conversation.view', () => ctx.slots.register({

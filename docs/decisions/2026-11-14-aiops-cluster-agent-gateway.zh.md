@@ -20,7 +20,7 @@
 - 明文只在创建响应中展示一次，并附带安装步骤；它不会进入快照、日志、URL 或浏览器存储。
 - agent 携带 bearer 令牌连接 `wss://<server>/api/aiops/agent`，发送包含名称、版本与能力集的 `hello`。server 认证摘要，要求 `hello` 名称与令牌所属集群一致，返回 `welcome`，并把类型化读请求路由到该连接。
 - 协议面是封闭的：`get`、`list`、`events`、`logs`、`probe`。不存在 path、URL、verb 或 exec 透传，因此即使 server 被攻破，也无法把 agent 变成任意 API 客户端。agent 自己持有 allowlist 与 RBAC，server 无法扩大它。
-- **原生 kubeconfig Provider 将在 M2 删除，包括运行 DSH 的那个集群。** 不保留本地回退，也不做 Provider 选择抽象。一个令牌属于一个集群；吊销后重新创建是唯一的轮换方式。
+- **原生 kubeconfig Provider 已删除（M2 完成），包括运行 DSH 的那个集群。** 不保留本地回退，也不做 Provider 选择抽象。一个令牌属于一个集群；吊销后重新创建是唯一的轮换方式。
 - **首次接入就是零集群的正常启动。** server 绝不在启动时生成或记录令牌。Portal 首页显示首次配置卡片提示创建令牌，`/readyz` 保持 ready，并报告 `components.clusters` 与 `configured`/`total`/`connected`。
 - **agent 的 server 地址始终由部署方显式配置。** server 不会推断、改写或特殊处理同集群/loopback 地址。位于 DSH 所在集群的 agent 与远端 agent 使用相同的 URL 与网络路径，部署文档明确要求该地址必须能从集群内部访问。
 - 一个集群最多一条在线连接。更新的握手会替换旧 socket（关闭码 `4006`）；吊销会关闭在线 socket（`4001`）并删除摘要，之后的 upgrade 收到 HTTP 401。
@@ -48,7 +48,7 @@
 - 每个部署（包括单个本地集群）多了一步引导：创建令牌、安装 agent、设置可从集群内访问的 server URL。
 - 在线 socket 是进程内状态。多副本部署时，在共享连接路由出现之前，读请求只会在持有该连接的副本上成功；部署应运行单副本或按此路由诊断流量。
 - 任何协议变更都要求 server 与 agent 一起发布；主版本在握手时校验，并且不支持原地自升级。
-- M2 落地前，诊断工具仍走原生 Provider，因此部署会短暂同时存在两套接口。
+- 删除原生 Provider 同时移除了 Host 侧 kubeconfig 接口、`KUBECONFIG`/`KUBERNETES_CONTEXT` 组合默认值、kubectl 兼容子路径与 Portal 的 Kubernetes 凭据表单；集群连通性现在是 agent 探测。
 
 ## 验证
 

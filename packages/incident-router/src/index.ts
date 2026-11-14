@@ -110,6 +110,10 @@ export interface Config {
     }
   }
   readonly diagnosisWindow: DiagnosisWindowPolicy
+  /** Alert label whose value names the cluster agent to read; defaults to `cluster`. */
+  readonly clusterLabel?: string
+  /** Cluster read when an alert carries no usable cluster label; empty means none. */
+  readonly defaultCluster?: string
   /** Deployment-owned bounds for best-effort prior-diagnosis reuse reads. */
   readonly history?: {
     readonly maxScanRecords: number
@@ -200,6 +204,8 @@ export const Config: z<Config> = z.object({
     prometheusStepSeconds: budget.required(),
     logTailLines: budget.required(),
   }).required(),
+  clusterLabel: z.string().default('cluster'),
+  defaultCluster: z.string().default(''),
   history: z.object({
     maxScanRecords: budget.default(DEFAULT_MAX_HISTORY_SCAN_RECORDS),
     maxIncidents: budget.default(DEFAULT_MAX_HISTORY_INCIDENTS),
@@ -288,6 +294,13 @@ function assertConfig(config: Config): void {
   }
   if (!isAbsolute(config.workspacePath)) {
     throw new Error('incident-router workspacePath must be absolute')
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(config.clusterLabel ?? 'cluster')) {
+    throw new Error('incident-router clusterLabel must be a Prometheus-style label name')
+  }
+  const defaultCluster = config.defaultCluster?.trim() ?? ''
+  if (defaultCluster !== '' && (defaultCluster.length > 63 || !CLUSTER_NAME_RE.test(defaultCluster))) {
+    throw new Error('incident-router defaultCluster must be a lowercase DNS label of at most 63 characters')
   }
   assertRoutingSettings(settingsFrom(config))
 }
@@ -381,7 +394,46 @@ function priorIncidentSection(priors: readonly PriorIncident[], alert: Alertmana
 }
 
 /** Build concise, machine-readable first-turn context. */
-function promptFor(event: AiopsAlertRouteEvent, locale: string, priorSection: string): string {
+/** One cluster-agent name, matching the registry and agent `--name` validation. */
+const CLUSTER_NAME_RE = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
+
+/**
+ * Cluster binding resolved from one alert: a valid label value wins, else the
+ * configured default, else nothing. An invalid label value never falls back:
+ * reading another cluster's objects would be worse than reading none.
+ */
+export interface ClusterBinding {
+  readonly cluster?: string
+  readonly problem?: string
+}
+
+export function resolveTargetCluster(
+  labels: Readonly<Record<string, string>>,
+  clusterLabel: string,
+  defaultCluster: string,
+): ClusterBinding {
+  const raw = (labels[clusterLabel] ?? '').trim()
+  if (raw !== '') {
+    return raw.length <= 63 && CLUSTER_NAME_RE.test(raw)
+      ? { cluster: raw }
+      : { problem: `label ${clusterLabel} is not a lowercase DNS label of at most 63 characters` }
+  }
+  const fallback = defaultCluster.trim()
+  return fallback === '' ? {} : { cluster: fallback }
+}
+
+/** Tell the model which cluster its Kubernetes tools will read, or why none is bound. */
+function clusterInstruction(binding: ClusterBinding): string {
+  if (binding.cluster !== undefined) {
+    return `Kubernetes evidence is bound to cluster agent "${binding.cluster}". kubernetes_* tools read that cluster only; cite it as the Kubernetes target.`
+  }
+  if (binding.problem !== undefined) {
+    return `No Kubernetes cluster is bound to this diagnosis (${binding.problem}). Do not call kubernetes_* tools; use Alertmanager, Prometheus, and supplied context only, and state the missing cluster binding in the report.`
+  }
+  return 'No Kubernetes cluster is bound to this diagnosis. Do not call kubernetes_* tools; use Alertmanager, Prometheus, and supplied context only.'
+}
+
+function promptFor(event: AiopsAlertRouteEvent, locale: string, priorSection: string, cluster: ClusterBinding): string {
   const lifecycle = event.alert.status === 'resolved'
     ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure; the router appends the deterministic resolved transition after this turn completes.'
     : 'Investigate this firing alert with read-only evidence collection.'
@@ -389,6 +441,7 @@ function promptFor(event: AiopsAlertRouteEvent, locale: string, priorSection: st
     `AIOps Alertmanager route ${event.decision}, round ${String(event.round)}.`,
     lifecycle,
     languageInstruction(locale),
+    clusterInstruction(cluster),
     'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use only read-only observation tools. Treat diagnosis as the authoritative alert-time anchor and tool parameter set; do not replace it with a relative "now" window.',
     'Separate facts from hypotheses and persist the complete current report with aiops_incident_report.',
     ...(priorSection === '' ? [] : [priorSection]),
@@ -398,8 +451,8 @@ function promptFor(event: AiopsAlertRouteEvent, locale: string, priorSection: st
 }
 
 /** One grouped turn preserves every normalized event while avoiding repeated model work. */
-function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string, priorSection: string): string {
-  if (events.length === 1 && events[0] !== undefined) return promptFor(events[0], locale, priorSection)
+function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string, priorSection: string, cluster: ClusterBinding): string {
+  if (events.length === 1 && events[0] !== undefined) return promptFor(events[0], locale, priorSection, cluster)
   const latest = events.at(-1)
   if (latest === undefined) throw new Error('incident router cannot prompt an empty route group')
   return [
@@ -408,6 +461,7 @@ function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string,
       ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure; the router appends the deterministic resolved transition after this turn completes.'
       : 'Investigate the grouped firing alerts with one read-only evidence pass.',
     languageInstruction(locale),
+    clusterInstruction(cluster),
     'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use the newest diagnosis window below and account for every grouped delivery id. Separate facts from hypotheses and persist one complete current report with aiops_incident_report.',
     ...(priorSection === '' ? [] : [priorSection]),
     'Normalized routed alerts, oldest first:',
@@ -501,6 +555,23 @@ export class AiopsIncidentRouter extends Service {
   /** Current versioned live policy, detached for Portal display and dry-run editing. */
   routingSettings(): RoutingSettings {
     return structuredClone(this.policy)
+  }
+
+  /**
+   * Cluster agent bound to one Session's alert round, or undefined. The
+   * observation tools resolve this per call so a diagnosis can only read the
+   * cluster its alert named.
+   */
+  clusterForSession(sessionId: string): string | undefined {
+    return this.store.clusterForSession(sessionId)
+  }
+
+  /** Binding for a Session: the stored round binding wins over a recomputed one. */
+  private clusterBinding(route: AcceptedRoute, labels: Readonly<Record<string, string>>): ClusterBinding {
+    const bound = this.store.clusterForSession(route.sessionId) ?? route.cluster
+    return bound === undefined
+      ? resolveTargetCluster(labels, this.config.clusterLabel ?? 'cluster', this.config.defaultCluster ?? '')
+      : { cluster: bound }
   }
 
   /** Bounded durable history of committed live policy changes. */
@@ -647,6 +718,11 @@ export class AiopsIncidentRouter extends Service {
     let diagnosisStartedAt: number | undefined
     let sessionId: string | undefined
     try {
+      const binding = resolveTargetCluster(
+        work[0]?.alert.labels ?? {},
+        this.config.clusterLabel ?? 'cluster',
+        this.config.defaultCluster ?? '',
+      )
       const routed = work.map(item => ({
         item,
         route: this.store.route({
@@ -656,6 +732,7 @@ export class AiopsIncidentRouter extends Service {
           alert: item.alert,
           severity: item.severity,
           receivedAt: item.receivedAt,
+          ...(binding.cluster === undefined ? {} : { cluster: binding.cluster }),
         }),
       }))
       const first = routed[0]
@@ -663,6 +740,9 @@ export class AiopsIncidentRouter extends Service {
       if (routed.some(item => item.route.sessionId !== first.route.sessionId)) {
         throw new Error('incident router grouped alerts across Session rounds')
       }
+      // The round's persisted binding is authoritative; the alert label only
+      // establishes it for a round that had none.
+      const groupBinding = this.clusterBinding(first.route, first.item.alert.labels)
       sessionId = first.route.sessionId
       agent = await this.ensureAgent(first.route, first.item.alert, signal)
       const events: AiopsAlertRouteEvent[] = []
@@ -670,7 +750,10 @@ export class AiopsIncidentRouter extends Service {
       diagnosisStartedAt = startedAt
       const cooldownUntil = startedAt + this.policy.stormControl.cooldownSeconds * 1_000
       for (const item of routed) {
-        this.store.markStarted(item.item, item.route, startedAt, cooldownUntil, reservation.tokens)
+        const auditedRoute = groupBinding.cluster === undefined || groupBinding.cluster === item.route.cluster
+          ? item.route
+          : { ...item.route, cluster: groupBinding.cluster }
+        this.store.markStarted(item.item, auditedRoute, startedAt, cooldownUntil, reservation.tokens)
         const event = this.routeEvent(item.item, item.route)
         if (!hasRouteEvent(agent, item.item.source, item.item.deliveryId, item.item.alert.fingerprint)) {
           appendIgnorableRouteEvent(agent.session, event)
@@ -688,7 +771,7 @@ export class AiopsIncidentRouter extends Service {
         ? await this.priorIncidentContext(latest.alert, signal)
         : []
       agent.followup(createUserMessage({
-        content: [{ type: 'text', text: promptForGroup(events, outputLocale(this.ctx), priorIncidentSection(priors, first.item.alert)) }],
+        content: [{ type: 'text', text: promptForGroup(events, outputLocale(this.ctx), priorIncidentSection(priors, first.item.alert), groupBinding) }],
         source: {
           kind: 'webhook',
           provider: 'alertmanager',
@@ -920,7 +1003,7 @@ export class AiopsIncidentRouter extends Service {
       ? await this.priorIncidentContext(alert, signal)
       : []
     agent.followup(createUserMessage({
-      content: [{ type: 'text', text: promptFor(event, outputLocale(this.ctx), priorIncidentSection(priors, alert)) }],
+      content: [{ type: 'text', text: promptFor(event, outputLocale(this.ctx), priorIncidentSection(priors, alert), this.clusterBinding(route, alert.labels)) }],
       source: {
         kind: 'webhook',
         provider: 'alertmanager',

@@ -64,11 +64,9 @@ export interface RoutingPolicyDryRunRequest {
 
 export type RoutingPolicyDryRunResult = RoutingPolicyEvaluation
 
-export type ConnectionTarget = 'prometheus' | 'alertmanager' | 'kubernetes'
+export type ConnectionTarget = 'prometheus' | 'alertmanager'
 
-export type ConnectionTestRequest =
-  | { readonly target: 'prometheus' | 'alertmanager'; readonly baseUrl: string }
-  | { readonly target: 'kubernetes'; readonly kubeconfig?: string; readonly context?: string }
+export type ConnectionTestRequest = { readonly target: ConnectionTarget; readonly baseUrl: string }
 
 export type ConnectionTestFailureCode =
   | 'invalid_url'
@@ -79,27 +77,14 @@ export type ConnectionTestFailureCode =
   | 'unreachable'
   | 'authentication_failed'
   | 'forbidden'
-  | 'credential_exec_missing'
-  | 'rbac_denied'
-  | 'invalid_kubeconfig'
 
 export type ConnectionTestResult =
-  | {
-    readonly ok: true
-    readonly latencyMs: number
-    readonly kubernetes?: {
-      readonly context: string
-      readonly cluster: string
-      readonly namespace: string
-      readonly server: string
-    }
-  }
+  | { readonly ok: true; readonly latencyMs: number }
   | {
     readonly ok: false
     readonly code: ConnectionTestFailureCode
     readonly latencyMs: number
     readonly status?: number
-    readonly missingPermissions?: readonly string[]
   }
 
 export interface PortalIncident {

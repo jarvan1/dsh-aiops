@@ -1,3 +1,4 @@
+import { mkdtempSync } from 'node:fs'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -64,6 +65,60 @@ describe('incident route store', () => {
     expect(reopened).toMatchObject({ decision: 'reopened', round: 2, replay: false })
     expect(reopened.sessionId).not.toBe(created.sessionId)
     store.close()
+  })
+
+  it('binds one cluster per round, keeps it across reopen, and backfills a legacy round', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'aiops-router-cluster-'))
+    roots.push(directory)
+    const path = join(directory, 'router.sqlite')
+    const first = new IncidentRouteStore(path)
+    const created = first.route({
+      source: 'primary', deliveryId: 'c1', payloadDigest: 'c1', alert: alert('firing'),
+      severity: 'critical', receivedAt: Date.now(), cluster: 'prod-sh',
+    })
+    expect(created).toMatchObject({ decision: 'created', cluster: 'prod-sh' })
+    // A later alert for the same round cannot move it to another cluster.
+    first.route({
+      source: 'primary', deliveryId: 'c2', payloadDigest: 'c2', alert: alert('resolved'),
+      severity: 'critical', receivedAt: Date.now(), cluster: 'staging',
+    })
+    expect(first.clusterForSession(created.sessionId)).toBe('prod-sh')
+    first.close()
+
+    const reopened = new IncidentRouteStore(path)
+    expect(reopened.clusterForSession(created.sessionId)).toBe('prod-sh')
+    expect(reopened.clusterForSession('unknown-session')).toBeUndefined()
+    reopened.close()
+  })
+
+  it('migrates a v4 database and backfills the first usable cluster binding', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'aiops-router-migrate-'))
+    roots.push(directory)
+    const path = join(directory, 'router.sqlite')
+    const first = new IncidentRouteStore(path)
+    const created = first.route({
+      source: 'primary', deliveryId: 'm1', payloadDigest: 'm1', alert: alert('firing'),
+      severity: 'critical', receivedAt: Date.now(), cluster: 'prod-sh',
+    })
+    first.close()
+
+    // Recreate the pre-M2 shape: no cluster columns, schema version 4.
+    const { DatabaseSync } = await import('node:sqlite')
+    const raw = new DatabaseSync(path)
+    raw.exec('ALTER TABLE incident_rounds DROP COLUMN cluster')
+    raw.exec('ALTER TABLE route_audit DROP COLUMN cluster')
+    raw.exec('PRAGMA user_version = 4')
+    raw.close()
+
+    const migrated = new IncidentRouteStore(path)
+    expect(migrated.clusterForSession(created.sessionId)).toBeUndefined()
+    const appended = migrated.route({
+      source: 'primary', deliveryId: 'm2', payloadDigest: 'm2', alert: alert('resolved'),
+      severity: 'critical', receivedAt: Date.now(), cluster: 'staging',
+    })
+    expect(appended.sessionId).toBe(created.sessionId)
+    expect(migrated.clusterForSession(created.sessionId)).toBe('staging')
+    migrated.close()
   })
 
   it('suppresses exact delivery replay and rejects delivery-id content reuse', () => {

@@ -54,6 +54,8 @@ export interface RouteAuditRecord {
   readonly reason: string
   readonly sessionId?: string
   readonly round?: number
+  /** Cluster agent bound to the round, when the alert resolved one. */
+  readonly cluster?: string
   readonly queueDepth: number
   readonly reservedTokens: number
   readonly recordedAt: number
@@ -79,6 +81,8 @@ export interface AcceptedRoute {
   readonly sessionId: SessionIdType
   readonly round: number
   readonly severity: 'info' | 'warning' | 'critical'
+  /** Cluster agent bound to this round; absent means no Kubernetes target. */
+  readonly cluster?: string
 }
 
 /** Prior outcome for one exact delivery and fingerprint, independent of current policy. */
@@ -138,7 +142,7 @@ export class IncidentRouteStore {
     this.db.exec('PRAGMA busy_timeout = 5000')
     this.db.exec('PRAGMA journal_mode = WAL')
     const version = this.db.prepare('PRAGMA user_version').get() as { user_version: number }
-    if (version.user_version < 0 || version.user_version > 4) {
+    if (version.user_version < 0 || version.user_version > 5) {
       this.db.close()
       throw new Error(`incident router schema version ${String(version.user_version)} is unsupported`)
     }
@@ -247,8 +251,14 @@ export class IncidentRouteStore {
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       ) STRICT;
-      PRAGMA user_version = 4;
     `)
+    // v5 binds each round to the cluster agent its alerts named. Older rounds
+    // keep a NULL binding, which the Provider treats as "no Kubernetes target".
+    if (version.user_version < 5) {
+      this.db.exec('ALTER TABLE incident_rounds ADD COLUMN cluster TEXT')
+      this.db.exec('ALTER TABLE route_audit ADD COLUMN cluster TEXT')
+    }
+    this.db.exec('PRAGMA user_version = 5')
     this.recoverProcessingWork(Date.now())
   }
 
@@ -577,6 +587,7 @@ export class IncidentRouteStore {
       reason: work.reason,
       sessionId: route.sessionId,
       round: route.round,
+      ...(route.cluster === undefined ? {} : { cluster: route.cluster }),
       queueDepth: this.queueDepth(),
       reservedTokens,
       recordedAt: now,
@@ -596,6 +607,7 @@ export class IncidentRouteStore {
       reason: 'session-followup-durable',
       sessionId: route.sessionId,
       round: route.round,
+      ...(route.cluster === undefined ? {} : { cluster: route.cluster }),
       queueDepth: this.queueDepth(),
       reservedTokens,
       recordedAt: now,
@@ -672,8 +684,8 @@ export class IncidentRouteStore {
     `).all(...params, input.limit) as unknown as Array<{
       audit_id: number; source: string; delivery_id: string; fingerprint: string; alertname: string
       severity: 'info' | 'warning' | 'critical' | null; outcome: RouteAuditOutcome; reason: string
-      session_id: string | null; round: number | null; queue_depth: number; reserved_tokens: number
-      recorded_at: number; attempt: number
+      session_id: string | null; round: number | null; cluster: string | null
+      queue_depth: number; reserved_tokens: number; recorded_at: number; attempt: number
     }>
     return rows.map(row => ({
       id: row.audit_id,
@@ -686,6 +698,7 @@ export class IncidentRouteStore {
       reason: row.reason,
       ...(row.session_id === null ? {} : { sessionId: row.session_id }),
       ...(row.round === null ? {} : { round: row.round }),
+      ...(row.cluster === null ? {} : { cluster: row.cluster }),
       queueDepth: row.queue_depth,
       reservedTokens: row.reserved_tokens,
       recordedAt: row.recorded_at,
@@ -807,6 +820,7 @@ export class IncidentRouteStore {
     readonly reason: string
     readonly sessionId?: string
     readonly round?: number
+    readonly cluster?: string
     readonly queueDepth?: number
     readonly reservedTokens?: number
     readonly recordedAt: number
@@ -817,8 +831,8 @@ export class IncidentRouteStore {
     this.db.prepare(`
       INSERT OR IGNORE INTO route_audit
         (source, delivery_id, fingerprint, alertname, severity, outcome, reason,
-         session_id, round, queue_depth, reserved_tokens, recorded_at, attempt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         session_id, round, cluster, queue_depth, reserved_tokens, recorded_at, attempt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.source,
       input.deliveryId,
@@ -829,6 +843,7 @@ export class IncidentRouteStore {
       input.reason,
       input.sessionId ?? null,
       input.round ?? null,
+      input.cluster ?? null,
       input.queueDepth ?? this.queueDepth(),
       input.reservedTokens ?? 0,
       input.recordedAt,
@@ -844,6 +859,7 @@ export class IncidentRouteStore {
     readonly alert: AlertmanagerAlert
     readonly severity: 'info' | 'warning' | 'critical'
     readonly receivedAt: number
+    readonly cluster?: string
   }): AcceptedRoute {
     this.db.exec('BEGIN IMMEDIATE')
     try {
@@ -864,6 +880,7 @@ export class IncidentRouteStore {
     readonly alert: AlertmanagerAlert
     readonly severity: 'info' | 'warning' | 'critical'
     readonly receivedAt: number
+    readonly cluster?: string
   }): AcceptedRoute {
     const accepted = this.db.prepare(`
       SELECT payload_digest, session_id, round, decision, severity
@@ -912,8 +929,8 @@ export class IncidentRouteStore {
       `).run(input.source, input.alert.fingerprint, round, sessionId, input.alert.status, input.receivedAt)
       this.db.prepare(`
         INSERT INTO incident_rounds
-          (source, fingerprint, round, session_id, opened_at, resolved_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+          (source, fingerprint, round, session_id, opened_at, resolved_at, cluster)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.source,
         input.alert.fingerprint,
@@ -921,6 +938,7 @@ export class IncidentRouteStore {
         sessionId,
         input.receivedAt,
         input.alert.status === 'resolved' ? input.receivedAt : null,
+        input.cluster ?? null,
       )
     } else if (current.alert_status === 'resolved' && input.alert.status === 'firing') {
       round = current.current_round + 1
@@ -933,9 +951,9 @@ export class IncidentRouteStore {
       `).run(round, sessionId, input.receivedAt, input.source, input.alert.fingerprint)
       this.db.prepare(`
         INSERT INTO incident_rounds
-          (source, fingerprint, round, session_id, opened_at, resolved_at)
-        VALUES (?, ?, ?, ?, ?, NULL)
-      `).run(input.source, input.alert.fingerprint, round, sessionId, input.receivedAt)
+          (source, fingerprint, round, session_id, opened_at, resolved_at, cluster)
+        VALUES (?, ?, ?, ?, ?, NULL, ?)
+      `).run(input.source, input.alert.fingerprint, round, sessionId, input.receivedAt, input.cluster ?? null)
     } else {
       round = current.current_round
       sessionId = SessionId(current.session_id)
@@ -951,6 +969,14 @@ export class IncidentRouteStore {
           UPDATE incident_rounds SET resolved_at = ?
           WHERE source = ? AND fingerprint = ? AND round = ?
         `).run(input.receivedAt, input.source, input.alert.fingerprint, round)
+      }
+      // A round that predates cluster binding adopts the first usable binding
+      // it sees; a bound round never changes cluster mid-diagnosis.
+      if (input.cluster !== undefined) {
+        this.db.prepare(`
+          UPDATE incident_rounds SET cluster = COALESCE(cluster, ?)
+          WHERE source = ? AND fingerprint = ? AND round = ?
+        `).run(input.cluster, input.source, input.alert.fingerprint, round)
       }
     }
 
@@ -969,6 +995,25 @@ export class IncidentRouteStore {
       input.severity,
       input.receivedAt,
     )
-    return { replay: false, decision, sessionId, round, severity: input.severity }
+    return {
+      replay: false,
+      decision,
+      sessionId,
+      round,
+      severity: input.severity,
+      ...(input.cluster === undefined ? {} : { cluster: input.cluster }),
+    }
+  }
+
+  /**
+   * Cluster bound to one Session's round, or undefined when the round predates
+   * cluster binding or its alerts named no cluster.
+   */
+  clusterForSession(sessionId: string): string | undefined {
+    const row = this.db.prepare(`
+      SELECT cluster FROM incident_rounds WHERE session_id = ?
+    `).get(sessionId) as { cluster: string | null } | undefined
+    const cluster = row?.cluster?.trim() ?? ''
+    return cluster === '' ? undefined : cluster
   }
 }
