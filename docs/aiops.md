@@ -221,5 +221,6 @@ Source: [`packages/aiops-prometheus/src/index.ts`](../packages/aiops-prometheus/
 - [Time-anchored diagnosis decision](decisions/2026-09-06-time-anchored-diagnosis.md) — T0/window derivation, bounded Kubernetes reads, and packaged skill availability.
 - [Feedback and alert-storm decision](decisions/2026-09-06-operator-feedback-storm-control.md) — append-only review, queue, resource budgets, and audit semantics.
 - [AIOps Portal decision](decisions/2026-09-06-aiops-portal.md) — same-origin endpoint, workspace scope, and read-only UI boundary.
+- [Plugin-owned incident store decision](decisions/2026-11-14-aiops-plugin-owned-incident-store.md) — why incident state moved out of Session events into DSH storage domains.
 - [Production deployment and upgrade](deployment.md) — Host/TLS boundary, credential rotation, migration, and release procedure.
 - [Repeatable Alertmanager/k3s matrix](../deploy/alertmanager/README.md) — guarded real receiver and restart workflow.

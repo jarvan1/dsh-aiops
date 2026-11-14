@@ -221,5 +221,6 @@ Source: [`packages/aiops-prometheus/src/index.ts`](../packages/aiops-prometheus/
 - [时间锚诊断决策](decisions/2026-09-06-time-anchored-diagnosis.zh.md)——T0/窗口派生、有界 Kubernetes 读取与随包 skill 可用性。
 - [反馈与告警风暴控制决策](decisions/2026-09-06-operator-feedback-storm-control.zh.md)——追加式审核、队列、资源预算和审计语义。
 - [AIOps Portal 决策](decisions/2026-09-06-aiops-portal.zh.md)——同源接口、工作区范围和只读 UI 边界。
+- [插件自有事件存储决策](decisions/2026-11-14-aiops-plugin-owned-incident-store.zh.md)——为何事件状态从 Session 事件迁入 DSH 存储域。
 - [生产部署与升级](deployment.zh.md)——Host/TLS 边界、凭据轮换、迁移与发布流程。
 - [可重复 Alertmanager/k3s 矩阵](../deploy/alertmanager/README.zh.md)——带门槛的真实 receiver 与重启流程。
