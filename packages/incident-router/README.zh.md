@@ -19,6 +19,8 @@
 
 每个模型 turn 都会读取 DSH 持久化的 `locale.preference`，要求 Agent 使用该语言编写面向用户的说明和持久化事件报告文本。Host 偏好未设置或不可用时回退为英文，与 DSH Host 侧 locale fallback 一致；标识符与观测值保持原样。
 
+当 firing 告警打开新一轮时，Router 会附加诊断复用上下文：通过共享 session-query 服务（懒读取，缺失即禁用复用）在本工作区有界的 Session 历史中，寻找报告文本提及指纹身份 token 的最新已 resolved 事件，并在首轮提示词中列出其首要假设与建议，作为需对照新证据确认或舍弃的线索。追加轮次和恢复轮次不会重读历史；复用不产生写入——新轮次仍从全新报告开始。
+
 ## 配置
 
 `source` 选择一个 adapter 实例。`statePath` 和 `workspacePath` 必须为绝对路径（仅测试状态可使用 `:memory:`）。`agentPreset` 和 `permissionPreset` 控制 Session 组合。`routingPolicy.ignoredAlertnames` 是仅用于已确认噪声的精确匹配列表；空列表接受所有 alertname。`severityMap` 不区分大小写地把 Provider label 映射到 `info`、`warning` 或 `critical`；缺失或未知值使用 `routingPolicy.defaultSeverity`。`modelBudgets` 为每个 severity 设置单次最大输出 token 数。

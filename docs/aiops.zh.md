@@ -55,6 +55,8 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 恢复轮次结束后，Router 以确定性的方式关闭生命周期，而不依赖模型自行收尾：它读取最近持久化的 `plugin:aiops/incident-state` 记录，若事件尚未 resolved，则追加携带原状态的 `resolved` 状态，并附一条 `alert-recovery-<receivedAt>` 证据，引用告警名和恢复时间。该写入幂等——已 resolved 的事件保持不动——恢复提示词也明确告知模型不要自行关闭生命周期。若在轮次结束与该追加之间发生崩溃，事件保持 active；下一次 firing 告警会照常打开新一轮。
 
+当 firing 告警打开新一轮（`created` 或 `reopened`）时，Router 还会进行尽力而为的诊断复用：通过共享 session-query 服务，在本工作区有界的 Session 历史中扫描（默认 200 个 Session / 3 个事件），寻找报告文本中提及该告警指纹身份 token（完整值或稳定后缀）的最新已 resolved 事件，并把其首要假设和建议作为明确非权威的线索附到首轮提示词中，供模型对照新证据确认或舍弃。查询服务缺失或读取失败时复用被静默跳过；追加轮次和恢复轮次从不触发复用；复用不产生任何写入——模型仍从全新报告开始。
+
 ## Capability 角色
 
 | Capability | Service Definition 与 Provider | Consumer |

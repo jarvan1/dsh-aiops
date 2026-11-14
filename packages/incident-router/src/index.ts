@@ -8,9 +8,10 @@ import type {} from '@deepseek-ai/dsh-aiops-observability'
 import {
   MAX_COLLECTION_ITEMS,
   decodeAiopsIncidentState,
+  incidentSearchText,
   validateAiopsIncidentTransition,
 } from '@deepseek-ai/dsh-aiops-incident'
-import type { AiopsEvidence, AiopsEvidenceId, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
+import type { AiopsEvidence, AiopsEvidenceId, AiopsHypothesis, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
 import { brandString } from '@deepseek-ai/dsh-brand'
 import {
   LOCALE_PREFERENCE_FIELD,
@@ -20,8 +21,10 @@ import {
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import { appendPluginRecord, pluginRecordOf } from '@deepseek-ai/dsh-session'
-import type { PluginRecord } from '@deepseek-ai/dsh-session'
+import { SessionSeq } from '@deepseek-ai/dsh-session'
+import type { PluginRecord, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-session-title'
 import {
   WebhookDeliveryId,
@@ -112,6 +115,11 @@ export interface Config {
     }
   }
   readonly diagnosisWindow: DiagnosisWindowPolicy
+  /** Deployment-owned bounds for best-effort prior-diagnosis reuse reads. */
+  readonly history?: {
+    readonly maxScanSessions: number
+    readonly maxIncidents: number
+  }
 }
 
 /** Versioned live policy persisted through the DSH Settings service. */
@@ -134,6 +142,20 @@ export interface RoutingPolicyEvaluation {
 
 const budget = z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)
 const nonNegativeInteger = z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER)
+/** Default workspace sessions inspected by one prior-diagnosis reuse read. */
+const DEFAULT_MAX_HISTORY_SCAN_SESSIONS = 200
+/** Default resolved incidents attached as reuse context to one new round. */
+const DEFAULT_MAX_HISTORY_INCIDENTS = 3
+/**
+ * Incident state rides the DSH 0.2.x ignorable plugin-record grammar; the
+ * shared query seam lists events by type string, not the released map.
+ */
+const INCIDENT_RECORD_TYPE = 'plugin:aiops/incident-state'
+/** Shortest fingerprint suffix reused as a literal identity token. */
+const MIN_FINGERPRINT_SUFFIX = 6
+/** Clamp for one rendered prior-diagnosis context line. */
+const MAX_PRIOR_LINE_CHARS = 400
+const confidenceRank = { confirmed: 4, strong: 3, possible: 2, insufficient: 1 } as const
 const defaultRoutingPolicy: Config['routingPolicy'] = {
   ignoredAlertnames: ['Watchdog', 'InfoInhibitor'],
   defaultSeverity: 'warning',
@@ -188,6 +210,10 @@ export const Config: z<Config> = z.object({
     prometheusStepSeconds: budget.required(),
     logTailLines: budget.required(),
   }).required(),
+  history: z.object({
+    maxScanSessions: budget.default(DEFAULT_MAX_HISTORY_SCAN_SESSIONS),
+    maxIncidents: budget.default(DEFAULT_MAX_HISTORY_INCIDENTS),
+  }),
 })
 
 /** Validate values whose relation is not expressed by Schemastery. */
@@ -316,8 +342,56 @@ function languageInstruction(locale: string): string {
   return `Write all user-facing narrative and persisted incident-report text in ${language}, following the current DSH language preference. Preserve identifiers, labels, commands, field names, and observed evidence values verbatim.`
 }
 
+/** One resolved prior diagnosis recovered from this workspace's history. */
+interface PriorIncident {
+  readonly sessionId: SessionId
+  readonly closedAt: number
+  readonly incident: AiopsIncidentState
+}
+
+/** Fingerprint identity tokens whose appearance in prior report text marks a reusable diagnosis. */
+function fingerprintTokens(fingerprint: string): string[] {
+  const trimmed = fingerprint.trim()
+  const tokens = new Set<string>()
+  if (trimmed !== '') {
+    tokens.add(trimmed)
+    for (const length of [8, MIN_FINGERPRINT_SUFFIX] as const) {
+      if (trimmed.length > length) tokens.add(trimmed.slice(-length))
+    }
+  }
+  return [...tokens]
+}
+
+function clampPriorLine(text: string): string {
+  return text.length <= MAX_PRIOR_LINE_CHARS ? text : `${text.slice(0, MAX_PRIOR_LINE_CHARS - 1)}…`
+}
+
+/** Render recovered prior diagnoses as clearly-bounded, non-authoritative leads. */
+function priorIncidentSection(priors: readonly PriorIncident[], alert: AlertmanagerAlert): string {
+  if (priors.length === 0) return ''
+  const label = alert.labels['alertname'] ?? alert.fingerprint
+  const entries = priors.map(prior => {
+    const hypotheses = prior.incident.hypotheses
+      .slice()
+      .sort((left: AiopsHypothesis, right: AiopsHypothesis) =>
+        confidenceRank[right.confidence] - confidenceRank[left.confidence])
+      .slice(0, 3)
+    const recommendations = prior.incident.recommendations.slice(0, 2)
+    return [
+      `- resolved incident ${String(prior.incident.incidentId)} (closed ${new Date(prior.closedAt).toISOString()}, session ${String(prior.sessionId)}):`,
+      `  title: ${clampPriorLine(prior.incident.title)}`,
+      ...hypotheses.map(hypothesis => `  prior hypothesis (${hypothesis.confidence}): ${clampPriorLine(hypothesis.summary)}`),
+      ...recommendations.map(item => `  prior recommendation (${item.risk} risk): ${clampPriorLine(item.action)}`),
+    ].join('\n')
+  })
+  return [
+    `Workspace history recovered ${String(priors.length)} resolved prior incident(s) matching fingerprint tokens of ${label}. Treat them as starting leads only: prior hypotheses and recommendations are context from a closed investigation, never verified facts about the current alert. Confirm or discard each lead against fresh evidence before reusing it.`,
+    ...entries,
+  ].join('\n')
+}
+
 /** Build concise, machine-readable first-turn context. */
-function promptFor(event: AiopsAlertRouteEvent, locale: string): string {
+function promptFor(event: AiopsAlertRouteEvent, locale: string, priorSection: string): string {
   const lifecycle = event.alert.status === 'resolved'
     ? 'Alertmanager reports expression recovery. Do not equate this automatically with incident closure; the router appends the deterministic resolved transition after this turn completes.'
     : 'Investigate this firing alert with read-only evidence collection.'
@@ -327,14 +401,15 @@ function promptFor(event: AiopsAlertRouteEvent, locale: string): string {
     languageInstruction(locale),
     'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use only read-only observation tools. Treat diagnosis as the authoritative alert-time anchor and tool parameter set; do not replace it with a relative "now" window.',
     'Separate facts from hypotheses and persist the complete current report with aiops_incident_report.',
+    ...(priorSection === '' ? [] : [priorSection]),
     'Normalized routed alert:',
     JSON.stringify(event, null, 2),
   ].join('\n\n')
 }
 
 /** One grouped turn preserves every normalized event while avoiding repeated model work. */
-function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string): string {
-  if (events.length === 1 && events[0] !== undefined) return promptFor(events[0], locale)
+function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string, priorSection: string): string {
+  if (events.length === 1 && events[0] !== undefined) return promptFor(events[0], locale, priorSection)
   const latest = events.at(-1)
   if (latest === undefined) throw new Error('incident router cannot prompt an empty route group')
   return [
@@ -344,6 +419,7 @@ function promptForGroup(events: readonly AiopsAlertRouteEvent[], locale: string)
       : 'Investigate the grouped firing alerts with one read-only evidence pass.',
     languageInstruction(locale),
     'Load and follow the aiops-diag skill. Select Alertmanager, Prometheus, and Kubernetes evidence sources from the supplied labels and available context; Kubernetes is optional, not assumed. Use the newest diagnosis window below and account for every grouped delivery id. Separate facts from hypotheses and persist one complete current report with aiops_incident_report.',
+    ...(priorSection === '' ? [] : [priorSection]),
     'Normalized routed alerts, oldest first:',
     JSON.stringify(events, null, 2),
   ].join('\n\n')
@@ -613,8 +689,15 @@ export class AiopsIncidentRouter extends Service {
       if (!await this.ctx.sessions.flush(agent.session)) {
         throw new Error(`incident router could not flush Session ${first.route.sessionId}`)
       }
+      const latest = events.at(-1)
+      const opensInvestigation = latest !== undefined
+        && latest.alert.status === 'firing'
+        && (first.route.decision === 'created' || first.route.decision === 'reopened')
+      const priors = opensInvestigation && latest !== undefined
+        ? await this.priorIncidentContext(latest.alert, signal)
+        : []
       agent.followup(createUserMessage({
-        content: [{ type: 'text', text: promptForGroup(events, outputLocale(this.ctx)) }],
+        content: [{ type: 'text', text: promptForGroup(events, outputLocale(this.ctx), priorIncidentSection(priors, first.item.alert)) }],
         source: {
           kind: 'webhook',
           provider: 'alertmanager',
@@ -671,6 +754,55 @@ export class AiopsIncidentRouter extends Service {
       // always observes the report the turn persisted, never a stale snapshot.
       void this.settleResolved(agent, recovery, sessionId).finally(finish)
     })
+  }
+
+  /**
+   * Recover resolved prior diagnoses for one fingerprint from this router's
+   * workspace history, newest first, as best-effort reuse context. The read
+   * requires the shared session-query service; without it (or on any query
+   * failure) reuse is silently skipped and routing proceeds unaffected.
+   */
+  private async priorIncidentContext(alert: AlertmanagerAlert, signal: AbortSignal): Promise<PriorIncident[]> {
+    const query = this.ctx.get('sessionQuery') as Context['sessionQuery'] | undefined
+    if (query === undefined) return []
+    const maxScanSessions = this.config.history?.maxScanSessions ?? DEFAULT_MAX_HISTORY_SCAN_SESSIONS
+    const maxIncidents = this.config.history?.maxIncidents ?? DEFAULT_MAX_HISTORY_INCIDENTS
+    try {
+      const tokens = fingerprintTokens(alert.fingerprint)
+      if (tokens.length === 0) return []
+      const sessions = (await query.filterSessions([
+        { kind: 'cwd', values: [this.config.workspacePath] },
+      ] satisfies Parameters<Context['sessionQuery']['filterSessions']>[0], signal))
+        .filter(session => session.header.cwd === this.config.workspacePath)
+      const found = new Map<SessionId, PriorIncident>()
+      for (const session of sessions.slice(0, maxScanSessions)) {
+        signal.throwIfAborted()
+        const events = await query.listEvents(session.header.id)
+        let latest: { seq: number; time: number } | undefined
+        for (const event of events) {
+          if (event.type === (INCIDENT_RECORD_TYPE as typeof event.type)) latest = { seq: event.seq, time: event.time }
+        }
+        if (latest === undefined) continue
+        const window = await query.readEvent({ sessionId: session.header.id, seq: SessionSeq(latest.seq) }, signal)
+        const record = pluginRecordOf(window.target)
+        if (record?.type !== INCIDENT_RECORD_TYPE) continue
+        let incident: AiopsIncidentState
+        try {
+          incident = decodeAiopsIncidentState(record.data)
+        } catch {
+          continue
+        }
+        if (incident.status !== 'resolved') continue
+        if (!tokens.some(token => incidentSearchText(incident).includes(token))) continue
+        found.set(session.header.id, { sessionId: session.header.id, closedAt: latest.time, incident })
+        if (found.size >= maxIncidents) break
+      }
+      return [...found.values()].sort((left, right) => right.closedAt - left.closedAt)
+    } catch (error: unknown) {
+      if (signal.aborted) throw error
+      this.ctx.logger.warn('incident router skipped prior-diagnosis reuse:', error)
+      return []
+    }
   }
 
   /**
@@ -826,8 +958,12 @@ export class AiopsIncidentRouter extends Service {
     if (!await this.ctx.sessions.flush(agent.session)) {
       throw new Error(`incident router could not flush Session ${route.sessionId}`)
     }
+    const priors = alert.status === 'firing'
+      && (route.decision === 'created' || route.decision === 'reopened')
+      ? await this.priorIncidentContext(alert, signal)
+      : []
     agent.followup(createUserMessage({
-      content: [{ type: 'text', text: promptFor(event, outputLocale(this.ctx)) }],
+      content: [{ type: 'text', text: promptFor(event, outputLocale(this.ctx), priorIncidentSection(priors, alert)) }],
       source: {
         kind: 'webhook',
         provider: 'alertmanager',

@@ -19,6 +19,8 @@ Every policy-eligible alert is persisted before an Agent is created. The router 
 
 Each model turn reads DSH's durable `locale.preference` and instructs the Agent to use that language for user-facing narrative and persisted incident-report text. An unset or unavailable Host preference falls back to English, matching DSH's Host-side locale fallback; identifiers and observed values remain verbatim.
 
+When a firing alert opens a new round, the router attaches diagnosis-reuse context: through the shared session-query service (read lazily; absence disables reuse) it scans the workspace's bounded session history for the latest resolved incident whose report text mentions a fingerprint identity token, and lists its top hypotheses and recommendations in the first-turn prompt as leads to confirm or discard against fresh evidence. Appended and recovery rounds never re-read history, and reuse writes nothing — the new round still starts from a fresh report.
+
 ## Configuration
 
 `source` selects one adapter instance. `statePath` and `workspacePath` must be absolute (`:memory:` is test-only for state). `agentPreset` and `permissionPreset` control Session composition. `routingPolicy.ignoredAlertnames` is an exact-match list reserved for explicitly accepted noise; an empty list accepts every alert name. `severityMap` maps provider labels case-insensitively to `info`, `warning`, or `critical`, while missing or unknown values use `routingPolicy.defaultSeverity`. `modelBudgets` supplies the maximum output tokens per severity.

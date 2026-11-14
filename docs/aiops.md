@@ -63,6 +63,8 @@ The first firing creates round 1; repeated firing and resolved notifications app
 
 After a recovery turn settles, the router closes the lifecycle deterministically instead of trusting the model to do it: it reads the latest persisted `plugin:aiops/incident-state` record and, unless the incident is already resolved, appends the carried-forward state with status `resolved` plus one `alert-recovery-<receivedAt>` evidence entry citing the alert name and recovery time. The write is idempotent — an already-resolved incident is untouched — and the recovery prompt explicitly tells the model not to close the lifecycle itself. A crash between the settled turn and this append leaves the incident active; the next firing alert then opens a new round as usual.
 
+When a firing alert opens a new round (`created` or `reopened`), the router also performs best-effort diagnosis reuse: through the shared session-query service it scans this workspace's bounded session history (defaults 200 sessions / 3 incidents) for the latest resolved incident whose report text mentions an identity token of the alert fingerprint (full value or stable suffix), and attaches its top hypotheses and recommendations to the first-turn prompt as explicitly non-authoritative leads to confirm or discard against fresh evidence. Reuse is skipped silently when the query service is absent or a read fails, never runs for appended or recovery rounds, and adds no writes — the model still starts from a fresh report.
+
 ## Capability roles
 
 | Capability | Service Definition and Provider | Consumer |

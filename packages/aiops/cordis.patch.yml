@@ -71,6 +71,11 @@
           afterSeconds: 1800
           prometheusStepSeconds: 30
           logTailLines: 1000
+        # Best-effort prior-diagnosis reuse: bounded workspace-history reads
+        # that attach resolved matching incidents as leads on a new round.
+        history:
+          maxScanSessions: 200
+          maxIncidents: 3
 
     - id: aiops-alertmanager-webhook-ingress
       name: cordis:group

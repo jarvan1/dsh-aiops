@@ -4,6 +4,17 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-14 — Diagnosis reuse
+
+### Added
+
+- Added best-effort diagnosis reuse in the incident router: when a firing alert opens a new round (`created` or `reopened`), the router lazily reads the shared session-query service, scans this workspace's bounded session history (new `history.maxScanSessions`/`history.maxIncidents` entry settings, defaults 200/3) for the latest resolved incident whose report text mentions a fingerprint identity token (full value or stable 8/6-char suffix), and attaches its top hypotheses and recommendations to the first-turn prompt as explicitly non-authoritative leads.
+- Reuse is silent when the query service is absent or a read fails, never runs for appended or recovery rounds, performs no writes, and adds no new hard service dependency (lazy `ctx.get`, type-only import).
+
+### Validation
+
+- Full build, 25 test files and 177 tests pass (one opt-in real-cluster test remains skipped), GitHub source-package preparation, link check, and `git diff --check` pass. New router tests cover config defaults plus end-to-end prompt attachment: matching resolved prior attached with lead-only wording, unrelated-fingerprint and unresolved priors excluded, and appended rounds not re-reading history.
+
 ## Unreleased — 2026-11-08 — Alert-recovery lifecycle linkage
 
 ### Added

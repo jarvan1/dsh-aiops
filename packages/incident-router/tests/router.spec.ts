@@ -423,6 +423,100 @@ describe('AIOps incident router', () => {
     await vi.waitFor(() => expect(test.create).toHaveBeenCalledTimes(2))
   })
 
+  it('resolves history reuse defaults and attaches matching resolved priors as leads only', async () => {
+    const [resolved] = z.resolve(config, RouterConfig)
+    expect(resolved.history).toEqual({ maxScanSessions: 200, maxIncidents: 3 })
+
+    const priorSession = (id: string, incident: AiopsIncidentState) => {
+      const session = Session.create(SessionId(id), undefined, {
+        version: 4,
+        id: SessionId(id),
+        cwd: '/workspace',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        isSeeded: false,
+      })
+      appendPluginRecord(session, 'plugin:aiops/incident-state', incident)
+      return session
+    }
+    const matching = priorSession('prior-match', {
+      ...report('resolved'),
+      title: 'CrashLooping on the checkout pod',
+      evidence: [{
+        id: brandString<AiopsEvidenceId>('alert-fingerprint-1'),
+        kind: 'alert',
+        summary: 'Alertmanager fingerprint 0123456789abcdef grouped 3 firing notifications',
+      }],
+      hypotheses: [{
+        summary: 'image digest regression caused the restart loop',
+        confidence: 'strong',
+        evidenceIds: [brandString<AiopsEvidenceId>('alert-fingerprint-1')],
+      }],
+      recommendations: [{ action: 'Pin the previous image digest', risk: 'low' }],
+    })
+    const unrelated = priorSession('prior-other', {
+      ...report('resolved'),
+      evidence: [{
+        id: brandString<AiopsEvidenceId>('alert-fingerprint-2'),
+        kind: 'alert',
+        summary: 'Alertmanager fingerprint ffffffffffffffff grouped 2 firing notifications',
+      }],
+      hypotheses: [{
+        summary: 'unrelated database failover hypothesis',
+        confidence: 'possible',
+        evidenceIds: [brandString<AiopsEvidenceId>('alert-fingerprint-2')],
+      }],
+    })
+    const stillOpen = priorSession('prior-open', {
+      ...report('investigating'),
+      evidence: [{
+        id: brandString<AiopsEvidenceId>('alert-fingerprint-3'),
+        kind: 'alert',
+        summary: 'Alertmanager fingerprint 0123456789abcdef still under investigation',
+      }],
+      hypotheses: [],
+    })
+    const sessions = [matching, unrelated, stillOpen]
+    const test = harness()
+    test.ctx.provide('sessionQuery', {
+      filterSessions: async () => sessions.map(session => ({
+        header: session.header,
+        live: false,
+        persisted: true,
+      })),
+      listEvents: async (id: ReturnType<typeof SessionId>) => {
+        const session = sessions.find(item => item.header.id === id)
+        return session === undefined ? [] : session.ownEvents().map(event => ({
+          sessionId: id,
+          seq: event.seq,
+          type: event.type,
+          time: event.time,
+        }))
+      },
+      readEvent: async (request: { sessionId: ReturnType<typeof SessionId>; seq: number }) => {
+        const session = sessions.find(item => item.header.id === request.sessionId)
+        const target = session?.ownEvents().find(event => event.seq === request.seq)
+        if (target === undefined) throw new Error(`fake query missing ${String(request.sessionId)}:${String(request.seq)}`)
+        return { session: session?.header, target }
+      },
+    } as never)
+    const signal = new AbortController().signal
+    await test.rule().run(delivery('reuse-firing'), signal)
+    const agent = [...test.agents.values()][0]
+    const prompt = JSON.stringify(agent?.followups[0])
+    expect(prompt).toContain('Workspace history recovered 1 resolved prior incident(s) matching fingerprint tokens of KubePodCrashLooping')
+    expect(prompt).toContain('prior hypothesis (strong): image digest regression caused the restart loop')
+    expect(prompt).toContain('prior recommendation (low risk): Pin the previous image digest')
+    expect(prompt).toContain('Treat them as starting leads only')
+    expect(prompt).toContain('prior-match')
+    expect(prompt).not.toContain('unrelated database failover hypothesis')
+    expect(prompt).not.toContain('prior-open')
+    // Appended firing rounds keep living context instead of re-reading history.
+    await test.rule().run(delivery('reuse-firing-2'), signal)
+    const followup = JSON.stringify([...test.agents.values()][0]?.followups[1])
+    expect(followup).not.toContain('prior hypothesis')
+  })
+
   it('ignores configured noise while routing arbitrary alerts with fallback severity', async () => {
     const test = harness()
     const signal = new AbortController().signal
