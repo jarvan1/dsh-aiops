@@ -1,3 +1,4 @@
+import type { AgentCapabilities, AgentClusterView, AgentQueryErrorCode } from '@deepseek-ai/dsh-aiops-agents'
 import type { AiopsIncidentState, AiopsOperatorFeedback } from '@deepseek-ai/dsh-aiops-incident'
 import type {
   RouteAuditOutcome,
@@ -11,6 +12,44 @@ export const PORTAL_API_PATH = '/api/aiops/portal'
 export const PORTAL_CONNECTION_TEST_API_PATH = '/api/aiops/portal/connections/test'
 export const PORTAL_WEBHOOK_CONFIGURATION_API_PATH = '/api/aiops/portal/webhook-configuration'
 export const PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH = '/api/aiops/portal/routing-policy/dry-run'
+export const PORTAL_CLUSTERS_API_PATH = '/api/aiops/portal/clusters'
+export const PORTAL_CLUSTER_TOKEN_API_PATH = '/api/aiops/portal/clusters/token'
+export const PORTAL_CLUSTER_REVOKE_API_PATH = '/api/aiops/portal/clusters/revoke'
+export const PORTAL_CLUSTER_PROBE_API_PATH = '/api/aiops/portal/clusters/probe'
+
+/** One registered cluster, as the Portal may display it (never the token). */
+export type PortalCluster = AgentClusterView
+
+/** Response to issuing or re-issuing a token; the plaintext is shown once. */
+export interface PortalClusterToken {
+  readonly cluster: PortalCluster
+  readonly token: string
+}
+
+/** Result of probing one connected agent. */
+export type ClusterProbeResult =
+  | {
+    readonly ok: true
+    readonly latencyMs: number
+    readonly agent: {
+      readonly name: string
+      readonly version: string
+      readonly protocol: number
+      readonly capabilities: AgentCapabilities
+    }
+  }
+  | {
+    readonly ok: false
+    readonly code: AgentQueryErrorCode | 'not_found'
+    readonly latencyMs: number
+  }
+
+/** GET /clusters response; `needsCluster` drives the first-run prompt. */
+export interface PortalClusters {
+  readonly version: 1
+  readonly clusters: PortalCluster[]
+  readonly needsCluster: boolean
+}
 
 export interface WebhookConfiguration {
   readonly version: 2
@@ -87,7 +126,7 @@ export interface PortalSummary {
 }
 
 export interface PortalSnapshot {
-  readonly version: 3
+  readonly version: 4
   readonly workspace: string
   readonly generatedAt: number
   readonly summary: PortalSummary
@@ -95,4 +134,8 @@ export interface PortalSnapshot {
   readonly audit: RouteAuditRecord[]
   readonly routingSettings: RoutingSettings
   readonly routingPolicyAudit: RoutingPolicyAuditRecord[]
+  /** Registered cluster agents; empty before the first token is issued. */
+  readonly clusters: PortalCluster[]
+  /** True while no non-revoked cluster exists; the home view prompts onboarding. */
+  readonly needsCluster: boolean
 }

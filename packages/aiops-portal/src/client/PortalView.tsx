@@ -3,16 +3,24 @@ import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/clie
 import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   PORTAL_API_PATH,
+  PORTAL_CLUSTER_PROBE_API_PATH,
+  PORTAL_CLUSTER_REVOKE_API_PATH,
+  PORTAL_CLUSTER_TOKEN_API_PATH,
+  PORTAL_CLUSTERS_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
   PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH,
   PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
+  type ClusterProbeResult,
   type ConnectionTestRequest,
   type ConnectionTestResult,
+  type PortalCluster,
+  type PortalClusterToken,
   type PortalIncident,
   type PortalSnapshot,
   type RoutingPolicyDryRunRequest,
   type RoutingPolicyDryRunResult,
 } from '../types.ts'
+import { ClusterOnboarding, ClustersPanel, TokenReveal } from './ClustersPanel.tsx'
 import { ConnectionSettings } from './ConnectionSettings.tsx'
 import { RoutingPolicySettings } from './RoutingPolicySettings.tsx'
 import type { PortalViewInjected } from './contracts.ts'
@@ -63,7 +71,7 @@ function IncidentDetail({ item, t }: { item: PortalIncident; t: Props['t'] }) {
   </article>
 }
 
-export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, onClose, t }: DashboardProps) {
+export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, clusterActions, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, onClose, t }: DashboardProps) {
   const [snapshot, setSnapshot] = useState<PortalSnapshot | null>(null)
   const [error, setError] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -72,7 +80,10 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
   const [status, setStatus] = useState<StatusFilter>('all')
   const [review, setReview] = useState<ReviewFilter>('all')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [section, setSection] = useState<'incidents' | 'audit' | 'settings'>('incidents')
+  const [section, setSection] = useState<'incidents' | 'audit' | 'clusters' | 'settings'>('incidents')
+  // The plaintext token lives here, above every section and every refresh, so
+  // a snapshot reload can never unmount the one view that shows it.
+  const [issuedToken, setIssuedToken] = useState<PortalClusterToken | null>(null)
 
   const refresh = useCallback(async (silent = false, signal?: AbortSignal) => {
     const requestSignal = signal ?? new AbortController().signal
@@ -111,9 +122,11 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
         {onClose === undefined ? null : <button type="button" className={css.closeButton} aria-label={t('close')} onClick={onClose}>×</button>}
       </div>
     </header>
+    {issuedToken === null ? null : <TokenReveal issued={issuedToken} t={t} onDismiss={() => { setIssuedToken(null) }}/>}
     <nav className={css.tabs}>
       <button className={section === 'incidents' ? css.activeTab : ''} onClick={() => setSection('incidents')}>{t('incidents')} <span>{snapshot?.incidents.length ?? 0}</span></button>
       <button className={section === 'audit' ? css.activeTab : ''} onClick={() => setSection('audit')}>{t('audit')} <span>{snapshot?.audit.length ?? 0}</span></button>
+      <button className={section === 'clusters' ? css.activeTab : ''} onClick={() => setSection('clusters')}>{t('clusters')} <span>{snapshot?.clusters.length ?? 0}</span></button>
     </nav>
     {section === 'settings'
       ? <><ConnectionSettings loadWebhookConfiguration={loadWebhookConfiguration} testConnection={testConnection} prometheusSettings={prometheusSettings} alertmanagerSettings={alertmanagerSettings} kubernetesSettings={kubernetesSettings} t={t}/><RoutingPolicySettings routingSettings={routingSettings} dryRunRoutingPolicy={dryRunRoutingPolicy} audit={snapshot?.routingPolicyAudit ?? []} t={t}/></>
@@ -123,8 +136,11 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
           ? <div className={css.center}><strong>{t('error')}</strong><button onClick={() => { void refresh() }}>{t('retry')}</button></div>
           : snapshot === null
             ? null
-            : <>
+            : section === 'clusters'
+              ? <ClustersPanel clusters={snapshot.clusters} needsCluster={snapshot.needsCluster} clusterActions={clusterActions} onChanged={() => { void refresh(true) }} onIssued={setIssuedToken} t={t}/>
+              : <>
     {error ? <div className={css.error}>{t('error')}</div> : null}
+    <ClusterOnboarding clusters={snapshot.clusters} needsCluster={snapshot.needsCluster} clusterActions={clusterActions} onChanged={() => { void refresh(true) }} onIssued={setIssuedToken} t={t}/>
     <section className={css.metrics}>
       <div><span>{t('total')}</span><strong>{snapshot.summary.totalIncidents}</strong></div>
       <div><span>{t('active')}</span><strong>{snapshot.summary.active}</strong></div>
@@ -155,12 +171,13 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
   </main>
 }
 
-export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, t }: Props) {
+export function PortalView({ loadSnapshot, loadWebhookConfiguration, testConnection, dryRunRoutingPolicy, clusterActions, prometheusSettings, alertmanagerSettings, kubernetesSettings, routingSettings, t }: Props) {
   return <PortalDashboard
     loadSnapshot={loadSnapshot}
     loadWebhookConfiguration={loadWebhookConfiguration}
     testConnection={testConnection}
     dryRunRoutingPolicy={dryRunRoutingPolicy}
+    clusterActions={clusterActions}
     prometheusSettings={prometheusSettings}
     alertmanagerSettings={alertmanagerSettings}
     kubernetesSettings={kubernetesSettings}
@@ -216,4 +233,38 @@ export async function fetchRoutingPolicyDryRun(
   })
   if (!response.ok) throw new Error(`AIOps routing policy dry-run HTTP ${response.status}`)
   return await response.json() as RoutingPolicyDryRunResult
+}
+
+async function clusterMutation<T>(path: string, body: unknown, fallback: string, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+    ...(signal === undefined ? {} : { signal }),
+  })
+  if (!response.ok) {
+    // The server answers with a bounded `{ error }` code; surfacing it lets the
+    // panel explain a conflict instead of a generic failure.
+    const payload = await response.json().catch(() => undefined) as { error?: unknown } | undefined
+    throw new Error(typeof payload?.error === 'string' ? payload.error : fallback)
+  }
+  return await response.json() as T
+}
+
+export function createPortalCluster(name: string, signal?: AbortSignal): Promise<PortalClusterToken> {
+  return clusterMutation<PortalClusterToken>(PORTAL_CLUSTERS_API_PATH, { name }, 'cluster_create_failed', signal)
+}
+
+export function reissuePortalClusterToken(name: string, signal?: AbortSignal): Promise<PortalClusterToken> {
+  return clusterMutation<PortalClusterToken>(PORTAL_CLUSTER_TOKEN_API_PATH, { name }, 'cluster_token_failed', signal)
+}
+
+export async function revokePortalCluster(name: string, signal?: AbortSignal): Promise<PortalCluster> {
+  const body = await clusterMutation<{ cluster: PortalCluster }>(PORTAL_CLUSTER_REVOKE_API_PATH, { name }, 'cluster_revoke_failed', signal)
+  return body.cluster
+}
+
+export function probePortalCluster(name: string, signal?: AbortSignal): Promise<ClusterProbeResult> {
+  return clusterMutation<ClusterProbeResult>(PORTAL_CLUSTER_PROBE_API_PATH, { name }, 'cluster_probe_failed', signal)
 }

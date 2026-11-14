@@ -24,8 +24,9 @@ describe('GitHub source installation', () => {
     const entries = [...patch.matchAll(/^\s+name: '(\.\/packages\/[^']+)'$/gm)]
       .map(match => match[1])
 
-    expect(entries).toHaveLength(12)
+    expect(entries).toHaveLength(13)
     expect(entries).toContain('./packages/aiops-delivery/lib/index.js')
+    expect(entries).toContain('./packages/aiops-agents/lib/index.js')
     expect(patch).not.toContain('KUBECTL_COMMAND')
     for (const entry of entries) await expect(access(resolve(root, entry!))).resolves.toBeUndefined()
   })

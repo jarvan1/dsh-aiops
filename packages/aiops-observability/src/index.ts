@@ -12,6 +12,15 @@ type WebhookOutcome = 'accepted' | 'authentication_failed' | 'rejected' | 'dispa
 type WorkOutcome = 'grouped' | 'deferred' | 'dropped'
 type Component = 'router' | 'webhook'
 
+/** Cluster-agent readiness: presence of the gateway and whether any cluster is attached. */
+export interface ClusterReadiness {
+  readonly configured: boolean
+  readonly total: number
+  readonly connected: number
+}
+
+interface ClusterRow { readonly status: string }
+
 export interface RouterGauges {
   readonly queueDepth: number
   readonly queueOldestAgeSeconds: number
@@ -110,9 +119,28 @@ export class AiopsTelemetry extends Service {
     for (const bucket of LATENCY_BUCKETS) if (seconds <= bucket) this.latencyBuckets.set(bucket, (this.latencyBuckets.get(bucket) ?? 0) + 1)
   }
 
-  readiness(): { ready: boolean; components: Record<Component, boolean> } {
-    const components = { router: this.ready.has('router'), webhook: this.ready.has('webhook') }
-    return { ready: components.router && components.webhook, components }
+  /**
+   * Readiness never depends on a cluster being attached: the server, routing,
+   * and the agent endpoint are usable before the first token is issued. The
+   * cluster block reports that state instead of failing the probe.
+   */
+  readiness(): { ready: boolean; components: Record<Component | 'clusters', boolean>; clusters: ClusterReadiness } {
+    const agents = this.ctx.get('aiopsAgents') as { listClusters?: () => readonly ClusterRow[] } | undefined
+    const rows = agents?.listClusters?.() ?? []
+    const components = {
+      router: this.ready.has('router'),
+      webhook: this.ready.has('webhook'),
+      clusters: agents !== undefined,
+    }
+    return {
+      ready: components.router && components.webhook,
+      components,
+      clusters: {
+        configured: rows.some(row => row.status !== 'revoked'),
+        total: rows.length,
+        connected: rows.filter(row => row.status === 'connected').length,
+      },
+    }
   }
 
   renderMetrics(): string {

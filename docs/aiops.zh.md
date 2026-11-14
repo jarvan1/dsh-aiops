@@ -67,8 +67,13 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 | 诊断流程 | 全局注册的随包 [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.zh.md) | `aiops-diag` 动态选择 Alertmanager、Prometheus、服务与 Kubernetes 证据分支 |
 | 运维 Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.zh.md)、固定同源 `/api/aiops/portal` | DSH Web 常驻侧边栏入口、Session 视图、实时数据源/路由设置与 dry-run |
 | 产品自观测 | [`dsh-aiops-observability`](../packages/aiops-observability/README.zh.md)、`ctx.aiopsTelemetry` | `/api/aiops/healthz`、`/api/aiops/readyz` 与低基数 `/api/aiops/metrics` |
+| 集群 agent | [`dsh-aiops-agents`](../packages/aiops-agents/README.zh.md)、`ctx.aiopsAgents`、`/api/aiops/agent` WebSocket | Portal 集群管理，以及后续的 agent 版 `KubernetesRuntime`（M2） |
 
 每个 capability 都把 Service Definition 与当前 Provider 合并在一个包中，因为它们目前作为同一关注点演进。出现第二种传输或远程执行 Provider 时再拆分 Provider 包；Consumer 已经只依赖抽象 Service。
+
+## 多集群接入
+
+每个集群（包括运行 DSH 的那个）都通过只主动向外连接的 Go agent 读取，而不是 Host 侧的 kubeconfig。Portal 为每个集群签发一个令牌并只展示一次；`aiops_agent` 存储域只保留其 SHA-256 摘要、末四位、时间戳与最近上报的 agent 版本。agent 连接 `/api/aiops/agent`，用该令牌认证，并声明名称、版本与能力集；server 将名称绑定到令牌，跟踪 `pending`/`connected`/`offline`/`revoked` 状态，并在这条连接上执行类型化的 `get`/`list`/`events`/`logs` 读取与 `probe`。不存在 path、URL、verb 或 exec 透传，server 也不持有任何集群凭据。全新安装在没有集群的情况下正常启动，绝不生成或记录令牌，并在 Portal 中显示首次配置提示；agent 的 server 地址始终显式配置，且必须能从集群内部访问。诊断工具在 M2 之前仍走原生 Provider。参见[决策记录](decisions/2026-11-14-aiops-cluster-agent-gateway.zh.md)与 [agent 指南](../agent/README.zh.md)。
 
 ## 事件状态
 
@@ -222,5 +227,6 @@ Source: [`packages/aiops-prometheus/src/index.ts`](../packages/aiops-prometheus/
 - [反馈与告警风暴控制决策](decisions/2026-09-06-operator-feedback-storm-control.zh.md)——追加式审核、队列、资源预算和审计语义。
 - [AIOps Portal 决策](decisions/2026-09-06-aiops-portal.zh.md)——同源接口、工作区范围和只读 UI 边界。
 - [插件自有事件存储决策](decisions/2026-11-14-aiops-plugin-owned-incident-store.zh.md)——为何事件状态从 Session 事件迁入 DSH 存储域。
+- [集群 agent 网关决策](decisions/2026-11-14-aiops-cluster-agent-gateway.zh.md)——为何通过带 server 签发令牌的出站 agent 访问集群。
 - [生产部署与升级](deployment.zh.md)——Host/TLS 边界、凭据轮换、迁移与发布流程。
 - [可重复 Alertmanager/k3s 矩阵](../deploy/alertmanager/README.zh.md)——带门槛的真实 receiver 与重启流程。

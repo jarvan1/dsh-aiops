@@ -58,6 +58,8 @@ In a Web profile, use the persistent `AIOps` action in the sidebar footer to ope
 
 The same workspace manages versioned routing policy. A pasted normalized-label dry-run must succeed before the complete policy is saved atomically with a settings revision fence; changes apply live and are durably audited. The webhook credential remains server-side and the Portal returns only its configured status.
 
+Multi-cluster access uses an outbound-only Go agent installed inside each cluster. The AIOps Portal issues one token per cluster (shown once, stored as a digest), the agent dials the server and proves its cluster identity with it, and the server tracks `pending`/`connected`/`offline`/`revoked` without ever holding a cluster credential. Diagnosis reads still use the built-in kubeconfig provider until the agent-backed provider lands, and upgrades remain a manual rollout. See [the agent](agent/README.md), [its protocol](agent/docs/protocol.md), and [the server gateway](packages/aiops-agents/README.md).
+
 See [the AIOps subsystem guide](docs/aiops.md) for the delivery lifecycle, [production deployment and upgrade](docs/deployment.md) for the Host/TLS/rotation boundary, [the repeatable Alertmanager/k3s matrix](deploy/alertmanager/README.md) for real-cluster validation, [the roadmap](docs/roadmap.md) for completed and upcoming stages, and [the changelog](CHANGELOG.md) for notable changes.
 
 The main DSH repository remains the source of generic Session, query, workflow, permission, and runtime capabilities. This repository owns only the AIOps domain packages and bundle.

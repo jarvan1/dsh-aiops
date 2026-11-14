@@ -1,0 +1,20 @@
+# ---- Build stage: static Go binary for the cluster agent ----
+FROM golang:1.26-alpine AS build
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG VERSION=dev
+ENV GOPROXY=${GOPROXY} \
+    CGO_ENABLED=0
+WORKDIR /src
+# Resolve dependencies in their own layer so source edits rebuild quickly.
+COPY agent/go.mod agent/go.sum ./agent/
+RUN cd agent && go mod download
+COPY agent ./agent
+RUN cd agent && go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/aiops-agent ./cmd/aiops-agent
+
+# ---- Runtime stage: minimal image with only a CA bundle ----
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates \
+  && adduser -D -H -u 65532 aiops
+COPY --from=build /out/aiops-agent /usr/local/bin/aiops-agent
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/aiops-agent"]

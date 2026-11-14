@@ -12,6 +12,9 @@ coverage/
 *.sqlite-wal
 .DS_Store
 
+# Go agent build output (go build ./cmd/aiops-agent writes here).
+/agent/aiops-agent
+
 # Stale local compiler output; the package builds into lib/.
 packages/skill-k8s-diag/src/index.js
 packages/skill-k8s-diag/src/index.js.map

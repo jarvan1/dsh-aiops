@@ -67,8 +67,13 @@ When a firing alert opens a new round (`created` or `reopened`), the router also
 | Diagnostic workflow | Packaged [`dsh-aiops-skill-k8s-diag`](../packages/skill-k8s-diag/README.md), registered globally | `aiops-diag` dynamically selects Alertmanager, Prometheus, service, and Kubernetes evidence branches |
 | Operations Portal | [`dsh-aiops-portal`](../packages/aiops-portal/README.md), fixed same-origin `/api/aiops/portal` | Persistent DSH Web sidebar action, Session view, live data-source/routing settings, and dry-run |
 | Product observability | [`dsh-aiops-observability`](../packages/aiops-observability/README.md), `ctx.aiopsTelemetry` | `/api/aiops/healthz`, `/api/aiops/readyz`, and low-cardinality `/api/aiops/metrics` |
+| Cluster agents | [`dsh-aiops-agents`](../packages/aiops-agents/README.md), `ctx.aiopsAgents`, `/api/aiops/agent` WebSocket | Portal cluster management, and the future agent-backed `KubernetesRuntime` (M2) |
 
 Each capability combines its Service Definition and current Provider in one package because they currently evolve as one concern. A second transport or remote execution provider is the trigger to split Provider packages; the Consumer already depends only on the abstract Service.
+
+## Multi-cluster access
+
+Every cluster — including the one running DSH — is read through an outbound-only Go agent, not a host-side kubeconfig. The Portal issues one token per cluster and shows it once; the `aiops_agent` storage domain keeps only its SHA-256 digest, last four characters, timestamps, and the last reported agent version. The agent dials `/api/aiops/agent`, authenticates with that token, and announces its name, version, and capabilities; the server binds the name to the token, tracks `pending`/`connected`/`offline`/`revoked`, and runs typed `get`/`list`/`events`/`logs` reads plus `probe` over that socket. There is no path, URL, verb, or exec passthrough, and the server holds no cluster credential. A fresh install starts normally with zero clusters, never generates or logs a token, and shows a first-run prompt in the Portal; the agent's server URL is always explicit and must be reachable from inside the cluster. Diagnosis tools still read through the native provider until M2. See [the decision record](decisions/2026-11-14-aiops-cluster-agent-gateway.md) and [the agent guide](../agent/README.md).
 
 ## Incident state
 
@@ -222,5 +227,6 @@ Source: [`packages/aiops-prometheus/src/index.ts`](../packages/aiops-prometheus/
 - [Feedback and alert-storm decision](decisions/2026-09-06-operator-feedback-storm-control.md) — append-only review, queue, resource budgets, and audit semantics.
 - [AIOps Portal decision](decisions/2026-09-06-aiops-portal.md) — same-origin endpoint, workspace scope, and read-only UI boundary.
 - [Plugin-owned incident store decision](decisions/2026-11-14-aiops-plugin-owned-incident-store.md) — why incident state moved out of Session events into DSH storage domains.
+- [Cluster agent gateway decision](decisions/2026-11-14-aiops-cluster-agent-gateway.md) — why clusters are reached through outbound agents with server-issued tokens.
 - [Production deployment and upgrade](deployment.md) — Host/TLS boundary, credential rotation, migration, and release procedure.
 - [Repeatable Alertmanager/k3s matrix](../deploy/alertmanager/README.md) — guarded real receiver and restart workflow.

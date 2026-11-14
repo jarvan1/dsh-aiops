@@ -22,7 +22,7 @@ The `aiops/` group accepts authenticated Alertmanager notifications; routes stab
 <a id="packages"></a>
 ## Packages
 
-Thirteen packages cover ingress, routing, acquisition, model interaction, a packaged diagnostic skill, durable state, history reads, IM delivery, product telemetry, the Portal, and composition.
+Fourteen packages cover ingress, routing, acquisition, model interaction, a packaged diagnostic skill, durable state, history reads, IM delivery, product telemetry, cluster-agent access, the Portal, and composition.
 
 | Package | Role | ctx key or contribution |
 |---|---|---|
@@ -35,6 +35,7 @@ Thirteen packages cover ingress, routing, acquisition, model interaction, a pack
 | [`aiops-delivery/`](aiops-delivery/README.md) | Pushes completed diagnoses to Feishu, DingTalk, or Slack incoming webhooks with durable markers | `aiopsIncidents/changed` feed, `aiops_delivery` domain |
 | [`tool-aiops-history/`](tool-aiops-history/README.md) | Workspace-scoped report, feedback, and routing-audit tools | `ctx.tools` over `ctx.aiopsIncidents` and router |
 | [`aiops-portal/`](aiops-portal/README.md) | Read-only incidents plus revision-fenced data-source/routing settings and dry-run | `conversation.view`, `/api/aiops/portal` |
+| [`aiops-agents/`](aiops-agents/README.md) | Cluster-agent registry, one-time token issuance/revocation, and the `/api/aiops/agent` WebSocket read gateway | `ctx.aiopsAgents`, `aiops_agent` domain |
 | [`aiops-observability/`](aiops-observability/README.md) | Low-cardinality liveness, readiness, and Prometheus telemetry | `ctx.aiopsTelemetry`, `/api/aiops/{healthz,readyz,metrics}` |
 | [`webhook-alertmanager/`](webhook-alertmanager/README.md) | Bearer-authenticated, bounded Alertmanager v4 HTTP adapter | `ctx.webhookRuntime.dispatch()` |
 | [`incident-router/`](incident-router/README.md) | Fingerprint rounds, replay protection, durable queue, live versioned policy/audit, storm control, and deterministic Session lifecycle | `ctx.aiopsIncidentRouter` |

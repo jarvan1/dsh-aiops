@@ -4,6 +4,30 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-14 — Multi-cluster agent (client and server gateway)
+
+### Added
+
+- Added `agent/`, a Go cluster agent that dials the AIOps server over WebSocket and answers bounded, read-only Kubernetes queries, so one AIOps deployment can reach many clusters without host-side kubeconfigs. Protocol v1 exposes only `get`, `list`, `events`, and `logs`; there is no generic verb, path, URL, or exec passthrough.
+- Added an in-cluster REST client that reads the service-account token, cluster CA, and namespace from the standard mount and re-reads the token on every request, so projected-token rotation needs no restart. It replaces client-go with stdlib HTTP to keep the binary and the audit surface small. A `--service-account-dir` override (default: the standard mount) supports running the binary outside a Pod for local verification.
+- Added bounded execution with native-provider parity: the same resource allowlist, name/namespace validation before any API call, the same error-code taxonomy plus `busy`, a 2 MB response cap, log tail caps and local `untilTime` filtering, Event sorting and inclusive occurrence windows, a per-read deadline, one-page list semantics with `truncated`, and a 1 MiB inbound message cap.
+- Added the connection lifecycle: `hello`/`welcome` with protocol-version negotiation, heartbeats and ping/pong liveness, capped exponential reconnect backoff with jitter, fatal `401`/`403` and protocol mismatches, per-read concurrency limits, and `drain`/`resume` for rollouts. `upgrade` is deliberately refused (path A: the rollout applies the image).
+- Added `Dockerfile.agent` (static binary, non-root, CA bundle) and `agent/deploy/` with a read-only ClusterRole matching the executor allowlist plus a hardened Deployment example. A token Secret is created out of band and never committed.
+- Added bilingual agent documentation and an implementation-oriented [`agent/docs/protocol.md`](agent/docs/protocol.md), and linked them from the root READMEs.
+- Added `packages/aiops-agents`, the server half of protocol v1: the `/api/aiops/agent` WebSocket route (registered through `webServer.registerUpgrade`), bearer authentication against a stored digest, `hello`/`welcome` with name binding and protocol-major enforcement, per-connection result correlation with a request deadline, heartbeat/ping liveness, connection replacement, and revocation. Reads map the agent's closed error set onto the shared Kubernetes query codes, with `busy` reported as `unreachable`.
+- Added the durable `aiops_agent` storage domain and one-time token issuance. A token is `dsha_` plus 32 random bytes; only its SHA-256 digest and last four characters are persisted. Tokens are created, re-issued (pending clusters only), revoked, and probed through the Portal, never generated or logged at boot. A revoked cluster is dropped from the digest index, its live socket closes with code `4001`, and later upgrades receive HTTP 401.
+- Added Portal cluster management: snapshot version 4 carries `clusters` and `needsCluster`, the home view shows a first-run card prompting token creation, and a new **Clusters** tab lists `pending`/`connected`/`offline`/`revoked` with re-issue, revoke, and probe actions. The plaintext token is shown once with install steps and never enters the snapshot, a URL, or browser storage.
+- Readiness keeps `/readyz` ready with zero clusters and now reports `components.clusters` plus a `clusters` block (`configured`, `total`, `connected`).
+- Server-side multi-cluster routing into the diagnosis tools (M2) and the upgrade state machine (M3) remain future milestones; the native kubeconfig provider is still the active read path.
+
+### Validation
+
+- `go vet ./...` and `go test ./...` pass in `agent/`: 41 top-level tests (60 including subtests) covering protocol validation, executor behavior against a fake Kubernetes API (allowlist, name rejection before the API call, status mapping, size caps, event windows, log bounds, timeout), the WebSocket loop against a fake server (auth header, handshake, result correlation, probe, drain/busy, upgrade refusal, heartbeat, fatal 401, protocol mismatch, reconnect), and configuration parsing.
+- Both deployment manifests parse as multi-document YAML; the repository link check and `git diff --check` pass.
+- A local k3s v1.36 run used a temporary protocol stub (not committed) with a service-account token and the committed RBAC: the agent listed and read Pods, read pod logs, listed Events, returned `busy` while draining, and resumed. The run caught a real content-negotiation bug — kube-apiserver answers `406` for an explicit `Accept: text/plain` on the `pods/log` subresource — so log reads now accept any media type; a unit test pins the header.
+- A cross-language smoke ran the real Go agent against the real TypeScript gateway: the agent authenticated with a server-issued token, completed `hello`/`welcome`, answered `probe` with its capabilities, returned `unsupported_resource` for a resource outside the allowlist and `unreachable` for an absent API server, and was dropped with close code `4001` on revocation while the registry moved the row to `revoked`.
+- The full suite passes: 28 test files (one opt-in file skipped), 203 tests passed plus one skipped. New coverage includes token issuance/hashing, registry lifecycle across a restart, the full handshake and probe through the registered upgrade route, gateway auth/name/protocol rejection, result correlation and timeout, revocation and replacement, the Portal cluster routes (including one-time token and cross-site rejection), and cluster readiness with zero clusters.
+
 ## Unreleased — 2026-11-14 — Plugin-owned incident store
 
 ### Fixed

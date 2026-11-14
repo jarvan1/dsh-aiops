@@ -1,5 +1,6 @@
 /** Read-only Web portal over durable AIOps Session events and routing audit. */
 import type { Context } from '@deepseek-ai/cordis'
+import { AgentQueryError, AgentRegistryError } from '@deepseek-ai/dsh-aiops-agents'
 import type {} from '@deepseek-ai/dsh-aiops-incident-router'
 import { KubernetesQueryError } from '@deepseek-ai/dsh-aiops-kubernetes'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -9,9 +10,14 @@ import z from '@deepseek-ai/schemastery'
 import { testEndpointConnection } from './connectivity.ts'
 import {
   PORTAL_API_PATH,
+  PORTAL_CLUSTER_PROBE_API_PATH,
+  PORTAL_CLUSTER_REVOKE_API_PATH,
+  PORTAL_CLUSTER_TOKEN_API_PATH,
+  PORTAL_CLUSTERS_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
   PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH,
   PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
+  type ClusterProbeResult,
   type ConnectionTestRequest,
   type ConnectionTestResult,
   type RoutingPolicyDryRunRequest,
@@ -23,7 +29,7 @@ export * from './snapshot.ts'
 export * from './types.ts'
 
 export const name = 'aiops-portal'
-export const inject = ['aiopsIncidents', 'aiopsIncidentRouter', 'kubernetes', 'credentials']
+export const inject = ['aiopsAgents', 'aiopsIncidents', 'aiopsIncidentRouter', 'kubernetes', 'credentials']
 
 export interface Config {
   readonly maxIncidents?: number
@@ -140,6 +146,55 @@ export async function testPortalConnection(ctx: Context, request: ConnectionTest
           : error.code === 'timeout' ? 'timeout'
             : error.code === 'credential_exec_missing' ? 'credential_exec_missing' : 'unreachable'
     return { ok: false, code, latencyMs }
+  }
+}
+
+
+/** Read a `{ name }` request body; shape validation stays in the registry. */
+function clusterNameFrom(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const name = Reflect.get(value, 'name')
+  return typeof name === 'string' ? name : undefined
+}
+
+function registryStatus(error: AgentRegistryError): number {
+  switch (error.code) {
+    case 'invalid_name': return 400
+    case 'cluster_not_found': return 404
+    case 'cluster_exists': return 409
+    case 'cluster_limit_reached': return 409
+    case 'token_not_reissuable': return 409
+  }
+}
+
+/** Map a body-read or registry failure onto the portal's error envelope. */
+function writeRequestFailure(res: import('node:http').ServerResponse, error: unknown): void {
+  if (error instanceof AgentRegistryError) {
+    json(res, registryStatus(error), { error: error.code }, false)
+    return
+  }
+  const code = error instanceof Error ? error.message : 'invalid_request'
+  const status = code === 'unsupported_media_type' ? 415 : code === 'request_too_large' ? 413 : 400
+  json(res, status, { error: code }, false)
+}
+
+/** JSON body shared by the cluster mutation routes. */
+async function clusterNameBody(req: import('node:http').IncomingMessage): Promise<string | undefined> {
+  return clusterNameFrom(await readJsonBody(req))
+}
+
+
+/** Probe one connected agent; HTTP 200 carries the ok/code verdict. */
+async function probeCluster(ctx: Context, name: string, signal: AbortSignal): Promise<ClusterProbeResult> {
+  const started = performance.now()
+  try {
+    const agent = await ctx.aiopsAgents.probe(name, signal)
+    return { ok: true, latencyMs: Math.max(0, Math.round(performance.now() - started)), agent }
+  } catch (error: unknown) {
+    const latencyMs = Math.max(0, Math.round(performance.now() - started))
+    if (error instanceof AgentQueryError) return { ok: false, code: error.code, latencyMs }
+    if (error instanceof AgentRegistryError) return { ok: false, code: 'not_found', latencyMs }
+    return { ok: false, code: 'unreachable', latencyMs }
   }
 }
 
@@ -260,5 +315,123 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), `aiops-portal: ${PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_CLUSTERS_API_PATH,
+      async handler(req, res) {
+        const method = req.method ?? 'GET'
+        if (method === 'GET' || method === 'HEAD') {
+          json(res, 200, {
+            version: 1,
+            clusters: webCtx.aiopsAgents.listClusters(),
+            needsCluster: !webCtx.aiopsAgents.configured(),
+          }, method === 'HEAD')
+          return
+        }
+        if (method !== 'POST') {
+          res.setHeader('allow', 'GET, HEAD, POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
+        try {
+          const name = await clusterNameBody(req)
+          if (name === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          // The plaintext token is returned exactly once, in this response.
+          json(res, 201, await webCtx.aiopsAgents.createCluster(name), false)
+        } catch (error: unknown) {
+          writeRequestFailure(res, error)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_CLUSTERS_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_CLUSTER_TOKEN_API_PATH,
+      async handler(req, res) {
+        if (req.method !== 'POST') {
+          res.setHeader('allow', 'POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
+        try {
+          const name = await clusterNameBody(req)
+          if (name === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          json(res, 200, await webCtx.aiopsAgents.reissueToken(name), false)
+        } catch (error: unknown) {
+          writeRequestFailure(res, error)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_CLUSTER_TOKEN_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_CLUSTER_REVOKE_API_PATH,
+      async handler(req, res) {
+        if (req.method !== 'POST') {
+          res.setHeader('allow', 'POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
+        try {
+          const name = await clusterNameBody(req)
+          if (name === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          json(res, 200, { cluster: await webCtx.aiopsAgents.revokeCluster(name) }, false)
+        } catch (error: unknown) {
+          writeRequestFailure(res, error)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_CLUSTER_REVOKE_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_CLUSTER_PROBE_API_PATH,
+      async handler(req, res) {
+        if (req.method !== 'POST') {
+          res.setHeader('allow', 'POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
+        const controller = new AbortController()
+        const abort = (): void => controller.abort()
+        const abortIfUnfinished = (): void => { if (!res.writableEnded) controller.abort() }
+        req.once('aborted', abort)
+        res.once('close', abortIfUnfinished)
+        try {
+          const name = await clusterNameBody(req)
+          if (name === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          json(res, 200, await probeCluster(webCtx, name, controller.signal), false)
+        } catch (error: unknown) {
+          writeRequestFailure(res, error)
+        } finally {
+          req.off('aborted', abort)
+          res.off('close', abortIfUnfinished)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_CLUSTER_PROBE_API_PATH}`)
   })
 }

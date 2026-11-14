@@ -9,7 +9,7 @@ export interface PortalLimits {
   readonly maxScanIncidents: number
 }
 
-type PortalContext = Pick<Context, 'aiopsIncidents' | 'aiopsIncidentRouter'>
+type PortalContext = Pick<Context, 'aiopsIncidents' | 'aiopsIncidentRouter' | 'aiopsAgents'>
 
 export function summarizePortal(incidents: readonly PortalIncident[], audit: readonly RouteAuditRecord[]): PortalSummary {
   const auditCounts: Partial<Record<RouteAuditOutcome, number>> = {}
@@ -63,8 +63,10 @@ export function readPortalSnapshot(ctx: PortalContext, limits: PortalLimits): Po
         ...(lastRoute === undefined ? {} : { lastRoute }),
       }
     })
+  // Agent rows are process + registry state, not workspace state: the cluster
+  // list is global to this DSH instance and shown read-only next to incidents.
   return {
-    version: 3,
+    version: 4,
     workspace,
     generatedAt: Date.now(),
     summary: summarizePortal(incidents, audit),
@@ -72,5 +74,7 @@ export function readPortalSnapshot(ctx: PortalContext, limits: PortalLimits): Po
     audit,
     routingSettings,
     routingPolicyAudit,
+    clusters: ctx.aiopsAgents.listClusters(),
+    needsCluster: !ctx.aiopsAgents.configured(),
   }
 }

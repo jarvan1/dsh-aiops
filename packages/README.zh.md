@@ -22,7 +22,7 @@ kind: "package-group"
 <a id="packages"></a>
 ## 包
 
-十三个包覆盖入口、路由、采集、模型交互、随包诊断 skill、持久状态、历史读取、产品遥测、Portal 与组合。
+十四个包覆盖入口、路由、采集、模型交互、随包诊断 skill、持久状态、历史读取、产品遥测、集群 agent 接入、Portal 与组合。
 
 | 包 | 职责 | ctx key 或贡献 |
 |---|---|---|
@@ -34,6 +34,7 @@ kind: "package-group"
 | [`aiops-incident/`](aiops-incident/README.zh.md) | 插件自有存储上的完整报告、追加式反馈与写入工具 | `ctx.aiopsIncidents`、`aiops_incident` 域 |
 | [`tool-aiops-history/`](tool-aiops-history/README.zh.md) | 工作区范围的报告、反馈与路由审计工具 | 基于 `ctx.aiopsIncidents` 与 router 的 `ctx.tools` |
 | [`aiops-portal/`](aiops-portal/README.zh.md) | 只读事件及带 revision fence 的数据源/路由设置与 dry-run | `conversation.view`、`/api/aiops/portal` |
+| [`aiops-agents/`](aiops-agents/README.zh.md) | 集群 agent 注册表、一次性令牌签发/吊销与 `/api/aiops/agent` WebSocket 读取网关 | `ctx.aiopsAgents`、`aiops_agent` 域 |
 | [`aiops-observability/`](aiops-observability/README.zh.md) | 低基数存活、就绪与 Prometheus 遥测 | `ctx.aiopsTelemetry`、`/api/aiops/{healthz,readyz,metrics}` |
 | [`webhook-alertmanager/`](webhook-alertmanager/README.zh.md) | Bearer 认证、有界的 Alertmanager v4 HTTP adapter | `ctx.webhookRuntime.dispatch()` |
 | [`incident-router/`](incident-router/README.zh.md) | fingerprint 轮次、重放防护、持久队列、版本化实时策略/审计、风暴控制与确定性 Session 生命周期 | `ctx.aiopsIncidentRouter` |

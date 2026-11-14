@@ -1,0 +1,77 @@
+# One AIOps cluster agent.
+#
+# Before applying, replace the namespace (if not `aiops`), the server URL, and
+# the client name. The name is the cluster identity, is immutable, and must
+# match the token issued for this client.
+#
+# The token Secret is created out of band and never committed:
+#   kubectl -n aiops create secret generic aiops-agent-token --from-file=token=./token
+#
+# The agent only dials out; no Service or Ingress is needed. The rolling
+# strategy starts the replacement pod before stopping the old one, so a
+# diagnosis in flight is not interrupted; both pods share one client name.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aiops-agent
+  namespace: aiops
+  labels:
+    app.kubernetes.io/name: aiops-agent
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aiops-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: aiops-agent
+    spec:
+      serviceAccountName: aiops-agent
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: ghcr.io/jarvan1/dsh-aiops-agent:0.1.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --token-file=/var/run/aiops/token
+          env:
+            - name: AIOPS_AGENT_SERVER
+              value: wss://aiops.example.com/api/aiops/agent
+            - name: AIOPS_AGENT_NAME
+              value: prod-east
+          volumeMounts:
+            - name: token
+              mountPath: /var/run/aiops
+              readOnly: true
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: token
+          secret:
+            secretName: aiops-agent-token
+            defaultMode: 0444
+            items:
+              - key: token
+                path: token

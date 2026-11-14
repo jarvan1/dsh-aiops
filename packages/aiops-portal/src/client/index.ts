@@ -7,7 +7,17 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { en, NS, zh } from './locales.ts'
 import type { EndpointSettings, KubernetesSettings, PortalViewInjected, RouterPolicySettings } from './contracts.ts'
 import { AIOpsSidebarAction } from './AIOpsSidebarAction.tsx'
-import { fetchPortalSnapshot, fetchPortalConnectionTest, fetchRoutingPolicyDryRun, fetchWebhookConfiguration, PortalView } from './PortalView.tsx'
+import {
+  createPortalCluster,
+  fetchPortalConnectionTest,
+  fetchPortalSnapshot,
+  fetchRoutingPolicyDryRun,
+  fetchWebhookConfiguration,
+  probePortalCluster,
+  reissuePortalClusterToken,
+  revokePortalCluster,
+  PortalView,
+} from './PortalView.tsx'
 
 export const inject = ['slots', 'locale', 'configForms']
 
@@ -26,6 +36,12 @@ export function apply(ctx: Context): void {
     loadWebhookConfiguration: fetchWebhookConfiguration,
     testConnection: fetchPortalConnectionTest,
     dryRunRoutingPolicy: fetchRoutingPolicyDryRun,
+    clusterActions: {
+      createCluster: createPortalCluster,
+      reissueClusterToken: reissuePortalClusterToken,
+      revokeCluster: revokePortalCluster,
+      probeCluster: probePortalCluster,
+    },
     prometheusSettings,
     alertmanagerSettings,
     kubernetesSettings: kubernetesSettingsScope,

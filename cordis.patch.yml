@@ -155,6 +155,20 @@
         maxScanRecords: 500
         timeoutMs: 30000
 
+
+    # Cluster-agent registry and the /api/aiops/agent WebSocket endpoint.
+    # Tokens are issued from the Portal; the server holds no cluster
+    # credentials and never dials into a cluster.
+    - id: aiops-agents
+      name: './packages/aiops-agents/lib/index.js'
+      config:
+        maxClusters: 50
+        requestTimeoutMs: 30000
+        handshakeTimeoutMs: 10000
+        pingIntervalMs: 30000
+        idleTimeoutMs: 90000
+        maxPendingRequests: 32
+
     - id: aiops-portal
       name: './packages/aiops-portal/lib/index.js'
       config:

@@ -157,6 +157,39 @@
 .policyAudit ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
 .policyAudit li { display: grid; grid-template-columns: 180px minmax(0, 1fr) 180px; gap: 10px; color: var(--dsw-alias-label-secondary); font-size: 12px; }
 
+.onboarding { display: grid; gap: 14px; margin-bottom: 18px; padding: 20px 22px; border: .5px solid color-mix(in srgb, var(--portal-warning) 45%, transparent); border-radius: 12px; background: color-mix(in srgb, var(--portal-warning) 7%, var(--dsw-alias-bg-layer-1)); }
+.onboardingIntro h2 { margin: 5px 0 8px; font-size: 19px; }
+.onboardingIntro p { max-width: 760px; margin: 0; color: var(--dsw-alias-label-secondary); font-size: 13px; line-height: 20px; }
+.clusterCreator { display: grid; gap: 6px; max-width: 620px; }
+.clusterCreator form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.clusterCreator input { padding: 0 11px; }
+.clusterCreator input[aria-invalid="true"] { border-color: var(--portal-critical); }
+.clusterHint { margin: 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.clusterFailure { margin: 0; color: var(--portal-critical); font-size: 12px; }
+.clustersPanel { max-width: 1120px; margin: 0 auto; padding: 6px 0 30px; }
+.clustersPanel .settingsIntro { padding-bottom: 18px; }
+.clusterTable { overflow: hidden; border: .5px solid var(--dsw-alias-border-l2); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.clusterHead, .clusterRow { display: grid; grid-template-columns: minmax(140px, 1fr) 110px 110px 170px minmax(240px, 1.6fr); align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; border-bottom: .5px solid var(--dsw-alias-border-l2); font-size: 12px; }
+.clusterHead { min-height: 38px; color: var(--dsw-alias-label-tertiary); background: var(--dsw-alias-bg-base); }
+.clusterRow:last-child { border-bottom: 0; }
+.clusterRow > span { overflow: hidden; color: var(--dsw-alias-label-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.clusterRow strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.clusterActions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.clusterActions button { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.danger { border-color: color-mix(in srgb, var(--portal-critical) 55%, transparent) !important; color: var(--portal-critical) !important; }
+.tokenReveal { display: grid; gap: 10px; max-width: 760px; margin-bottom: 16px; padding: 16px 18px; border: .5px solid color-mix(in srgb, var(--portal-info) 45%, transparent); border-radius: 12px; background: var(--dsw-alias-bg-base); }
+.tokenReveal h3 { margin: 0; font-size: 14px; }
+.tokenOnce { margin: 0; color: var(--portal-warning); font-size: 12px; line-height: 18px; }
+.tokenRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.tokenValue { overflow: auto; padding: 9px 10px; border: .5px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: nowrap; }
+.installSteps { display: grid; gap: 6px; margin: 0; padding-left: 18px; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.installSteps code { overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.tokenReveal > button { justify-self: start; }
+.tone_connected { border-color: color-mix(in srgb, #52a56f 60%, transparent); color: #52a56f; }
+.tone_pending { border-color: color-mix(in srgb, var(--portal-info) 60%, transparent); color: var(--portal-info); }
+.tone_offline { border-color: color-mix(in srgb, var(--portal-warning) 60%, transparent); color: var(--portal-warning); }
+.tone_revoked { border-color: var(--dsw-alias-border-l2); color: var(--dsw-alias-label-tertiary); }
+
 @keyframes aiopsPortalSpin { to { transform: rotate(360deg); } }
 
 @media (max-width: 900px) {
@@ -174,6 +207,9 @@
   .policyWide { grid-column: auto; }
   .auditTable { overflow-x: auto; }
   .auditHead, .auditRow { min-width: 760px; }
+  .clusterTable { overflow-x: auto; }
+  .clusterHead, .clusterRow { min-width: 820px; }
+  .tokenRow { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 560px) {

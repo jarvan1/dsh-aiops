@@ -58,6 +58,8 @@ GitHub 安装使用仓库根 bundle 和相对路径构建产物；未来也可�
 
 同一工作台还可管理版本化路由策略。粘贴的标准化 label 必须先完成 dry-run，才能以 settings revision fence 原子保存完整策略；变更立即生效并持久审计。Webhook 凭据始终留在服务端，Portal 只返回是否已配置。
 
+多集群接入使用安装在每个集群内、只主动向外连接的 Go agent。AIOPS Portal 为每个集群签发一个令牌（仅展示一次，服务端只保留摘要），agent 连接 server 并用它证明集群身份，server 跟踪 `pending`/`connected`/`offline`/`revoked` 状态且从不持有集群凭据。诊断读取目前仍使用内置 kubeconfig Provider，直到 agent 版 Provider 落地；升级仍是手动发布的镜像滚动。参见 [agent 说明](agent/README.zh.md)、[协议](agent/docs/protocol.zh.md)与 [server 网关](packages/aiops-agents/README.zh.md)。
+
 Delivery 生命周期见 [AIOps 子系统说明](docs/aiops.zh.md)，Host/TLS/轮换边界见[生产部署与升级](docs/deployment.zh.md)，真实集群验证见[可重复 Alertmanager/k3s 矩阵](deploy/alertmanager/README.zh.md)，已完成与后续阶段见[路线图](docs/roadmap.zh.md)，重要变更见 [Changelog](CHANGELOG.md)。
 
 DSH 主仓库继续拥有通用 Session、查询、Workflow、权限与运行时能力。本仓库只拥有 AIOps 领域包和 bundle。

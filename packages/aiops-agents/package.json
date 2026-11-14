@@ -1,0 +1,45 @@
+{
+  "name": "@deepseek-ai/dsh-aiops-agents",
+  "description": "Cluster agent registry, server-issued tokens, and the WebSocket read gateway for DSH AIOps",
+  "version": "0.2.0-rc.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/gateway.js",
+    "lib/store.js",
+    "lib/tokens.js",
+    "lib/types.js",
+    "lib/types/**/*.d.ts"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "ws": "8.21.3",
+    "zod": "4.4.3"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.1.0",
+    "@deepseek-ai/dsh-host-webserver": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.2.2-rc.1",
+    "@deepseek-ai/dsh-storage-json": "^0.2.2-rc.1",
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1"
+  }
+}

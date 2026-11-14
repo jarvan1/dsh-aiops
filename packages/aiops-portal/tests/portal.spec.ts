@@ -6,7 +6,17 @@ import { filterPortalIncidents } from '../src/client/model.ts'
 import { testEndpointConnection } from '../src/connectivity.ts'
 import { apply, testPortalConnection } from '../src/index.ts'
 import { readPortalSnapshot, summarizePortal } from '../src/snapshot.ts'
-import { PORTAL_API_PATH, PORTAL_CONNECTION_TEST_API_PATH, PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH, PORTAL_WEBHOOK_CONFIGURATION_API_PATH, type PortalIncident } from '../src/types.ts'
+import {
+  PORTAL_API_PATH,
+  PORTAL_CLUSTER_PROBE_API_PATH,
+  PORTAL_CLUSTER_REVOKE_API_PATH,
+  PORTAL_CLUSTER_TOKEN_API_PATH,
+  PORTAL_CLUSTERS_API_PATH,
+  PORTAL_CONNECTION_TEST_API_PATH,
+  PORTAL_ROUTING_POLICY_DRY_RUN_API_PATH,
+  PORTAL_WEBHOOK_CONFIGURATION_API_PATH,
+  type PortalIncident,
+} from '../src/types.ts'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { RoutingSettings } from '@deepseek-ai/dsh-aiops-incident-router'
 
@@ -92,6 +102,7 @@ describe('AIOps Portal read model', () => {
       webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
       sessionQuery: {},
       aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
+      aiopsAgents: { listClusters: () => [], configured: () => false },
       kubernetes: {},
       credentials: { resolve },
       logger: { warn: vi.fn() },
@@ -129,6 +140,7 @@ describe('AIOps Portal read model', () => {
       effect: (setup: () => () => void) => { setup() },
       webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
       sessionQuery: {}, kubernetes: {}, credentials: { resolve: vi.fn(async () => undefined) },
+      aiopsAgents: { listClusters: () => [], configured: () => false },
       aiopsIncidentRouter: { dryRun }, logger: { warn: vi.fn() },
     }
     ctx.inject = (_services: string[], mount: (value: unknown) => void) => mount(ctx)
@@ -191,6 +203,71 @@ describe('AIOps Portal read model', () => {
       .resolves.toMatchObject({ ok: false, code: 'invalid_response' })
   })
 
+  it('issues a token once, lists clusters, reveals no secret, and rejects cross-site writes', async () => {
+    const routes: WebRoute[] = []
+    const issued = { cluster: { name: 'prod', status: 'pending', createdAt: 1_000 }, token: 'dsha_0123456789012345678901234567890123456789012' }
+    const createCluster = vi.fn(async () => issued)
+    const reissueToken = vi.fn(async () => issued)
+    const revokeCluster = vi.fn(async () => ({ name: 'prod', status: 'revoked', createdAt: 1_000, revokedAt: 1_500 }))
+    const probe = vi.fn(async () => ({ name: 'prod', version: '1.2.3', protocol: 1, capabilities: { resources: ['pods'], events: true, logs: true, maxResponseBytes: 2_000_000, maxTailLines: 2_000 } }))
+    const ctx: Record<string, unknown> = {
+      effect: (setup: () => () => void) => { setup() },
+      webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
+      sessionQuery: {}, kubernetes: {}, credentials: { resolve: vi.fn(async () => undefined) },
+      aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
+      aiopsAgents: { listClusters: () => [issued.cluster], configured: () => true, createCluster, reissueToken, revokeCluster, probe },
+      logger: { warn: vi.fn() },
+    }
+    ctx.inject = (_services: string[], mount: (value: unknown) => void) => mount(ctx)
+    apply(ctx as never, {})
+    const call = async (path: string, request: unknown, headers: Record<string, string> = {}) => {
+      const route = routes.find(value => value.path === path)
+      const req = Object.assign(Readable.from([JSON.stringify(request)]), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', host: 'dsh.example', ...headers },
+      }) as never
+      let body = ''
+      const res = Object.assign(new EventEmitter(), {
+        statusCode: 0,
+        setHeader: vi.fn(),
+        writableEnded: false,
+        end(value?: string) { body = value ?? ''; this.writableEnded = true },
+      })
+      await route?.handler(req, res as never)
+      return { status: res.statusCode, body: body === '' ? undefined : JSON.parse(body) as Record<string, unknown>, raw: body }
+    }
+
+    const created = await call(PORTAL_CLUSTERS_API_PATH, { name: 'prod' })
+    expect(created.status).toBe(201)
+    expect(created.body).toMatchObject({ token: issued.token, cluster: { name: 'prod', status: 'pending' } })
+    expect(createCluster).toHaveBeenCalledWith('prod')
+
+    // The read-only list never carries a token or digest, and HEAD/GET share it.
+    const listRoute = routes.find(value => value.path === PORTAL_CLUSTERS_API_PATH)
+    const listReq = Object.assign(new EventEmitter(), { method: 'GET' })
+    let listBody = ''
+    const listRes = { statusCode: 0, setHeader: vi.fn(), end: (value?: string) => { listBody = value ?? '' } }
+    await listRoute?.handler(listReq as never, listRes as never)
+    expect(JSON.parse(listBody)).toMatchObject({ version: 1, needsCluster: false, clusters: [{ name: 'prod', status: 'pending' }] })
+    expect(listBody).not.toContain('dsha_')
+    expect(listBody).not.toContain('tokenHash')
+
+    const rejected = await call(PORTAL_CLUSTERS_API_PATH, { name: 'prod' }, { 'sec-fetch-site': 'cross-site', origin: 'https://evil.example' })
+    expect(rejected.status).toBe(403)
+    expect(rejected.raw).not.toContain(issued.token)
+    expect(createCluster).toHaveBeenCalledTimes(1)
+
+    await expect(call(PORTAL_CLUSTER_TOKEN_API_PATH, { name: 'prod' })).resolves.toMatchObject({ status: 200, body: { token: issued.token } })
+    await expect(call(PORTAL_CLUSTER_REVOKE_API_PATH, { name: 'prod' })).resolves.toMatchObject({ status: 200, body: { cluster: { status: 'revoked' } } })
+
+    const probeRoute = routes.find(value => value.path === PORTAL_CLUSTER_PROBE_API_PATH)
+    expect(probeRoute).toBeDefined()
+    const probed = await call(PORTAL_CLUSTER_PROBE_API_PATH, { name: 'prod' })
+    expect(probed.status).toBe(200)
+    expect(probed.body).toMatchObject({ ok: true, agent: { name: 'prod', version: '1.2.3' } })
+    expect(probe).toHaveBeenCalledWith('prod', expect.any(AbortSignal))
+  })
+
   it('summarizes active, severity, review, and audit outcomes', () => {
     const reviewed = incident({
       feedback: {
@@ -239,10 +316,22 @@ describe('AIOps Portal read model', () => {
         listIncidents,
         latestFeedback: vi.fn((sessionId: string) => sessionId === 'aiops-session-2' ? staleFeedback : undefined),
       },
+      aiopsAgents: {
+        listClusters: () => [{ name: 'prod', status: 'connected', createdAt: 900, lastSeenAt: 980 }],
+        configured: () => true,
+      },
     }
     const snapshot = readPortalSnapshot(ctx as never, { maxIncidents: 10, maxAuditRecords: 10, maxScanIncidents: 10 })
     expect(listIncidents).toHaveBeenCalledWith('/srv/prod', 10)
-    expect(snapshot).toMatchObject({ version: 3, workspace: '/srv/prod', generatedAt: 9_999, routingSettings, routingPolicyAudit: [] })
+    expect(snapshot).toMatchObject({
+      version: 4,
+      workspace: '/srv/prod',
+      generatedAt: 9_999,
+      routingSettings,
+      routingPolicyAudit: [],
+      clusters: [{ name: 'prod', status: 'connected' }],
+      needsCluster: false,
+    })
     expect(snapshot.incidents).toHaveLength(2)
     expect(snapshot.incidents[0]).toMatchObject({ sessionId: 'aiops-session-1', revision: 3, updatedAt: 1_000, incident: { title: 'Latest diagnosis' }, lastRoute: { outcome: 'completed' } })
     // Feedback pinned to a superseded revision is dropped rather than shown.

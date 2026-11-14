@@ -21,7 +21,30 @@ describe('AiopsTelemetry', () => {
     expect(telemetry.readiness().ready).toBe(false)
     telemetry.markComponent('router', true)
     telemetry.markComponent('webhook', true)
-    expect(telemetry.readiness()).toEqual({ ready: true, components: { router: true, webhook: true } })
+    expect(telemetry.readiness()).toEqual({
+      ready: true,
+      components: { router: true, webhook: true, clusters: false },
+      clusters: { configured: false, total: 0, connected: 0 },
+    })
+  })
+
+  it('stays ready with zero clusters and reports the unconfigured component', () => {
+    const ctx = context()
+    const telemetry = new AiopsTelemetry(ctx)
+    telemetry.markComponent('router', true)
+    telemetry.markComponent('webhook', true)
+    let rows: Array<{ status: string }> = []
+    ctx.provide('aiopsAgents', { listClusters: () => rows } as never)
+    expect(telemetry.readiness()).toMatchObject({
+      ready: true,
+      components: { clusters: true },
+      clusters: { configured: false, total: 0, connected: 0 },
+    })
+    rows = [{ status: 'connected' }, { status: 'revoked' }]
+    expect(telemetry.readiness()).toMatchObject({
+      ready: true,
+      clusters: { configured: true, total: 2, connected: 1 },
+    })
   })
 
   it('renders low-cardinality counters, gauges, and cumulative latency buckets', () => {
