@@ -9,7 +9,9 @@ import { readPortalSnapshot, summarizePortal } from '../src/snapshot.ts'
 import {
   PORTAL_API_PATH,
   PORTAL_CLUSTER_PROBE_API_PATH,
+  PORTAL_CLUSTER_RESUME_API_PATH,
   PORTAL_CLUSTER_REVOKE_API_PATH,
+  PORTAL_CLUSTER_UPGRADE_API_PATH,
   PORTAL_CLUSTER_TOKEN_API_PATH,
   PORTAL_CLUSTERS_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
@@ -196,12 +198,14 @@ describe('AIOps Portal read model', () => {
     const reissueToken = vi.fn(async () => issued)
     const revokeCluster = vi.fn(async () => ({ name: 'prod', status: 'revoked', createdAt: 1_000, revokedAt: 1_500 }))
     const probe = vi.fn(async () => ({ name: 'prod', version: '1.2.3', protocol: 1, capabilities: { resources: ['pods'], events: true, logs: true, maxResponseBytes: 2_000_000, maxTailLines: 2_000 } }))
+    const upgradeCluster = vi.fn(async () => ({ name: 'prod', status: 'connected', createdAt: 1_000, agentVersion: '1.0.0', desiredVersion: '2.0.0', draining: true }))
+    const resumeCluster = vi.fn(async () => ({ name: 'prod', status: 'connected', createdAt: 1_000, agentVersion: '1.0.0', desiredVersion: '2.0.0' }))
     const ctx: Record<string, unknown> = {
       effect: (setup: () => () => void) => { setup() },
       webServer: { register: (next: WebRoute) => { routes.push(next); return vi.fn() } },
       sessionQuery: {}, credentials: { resolve: vi.fn(async () => undefined) },
       aiopsIncidentRouter: { workspacePath: '/srv/prod', listControlAudit: () => [] },
-      aiopsAgents: { listClusters: () => [issued.cluster], configured: () => true, createCluster, reissueToken, revokeCluster, probe },
+      aiopsAgents: { listClusters: () => [issued.cluster], configured: () => true, createCluster, reissueToken, revokeCluster, probe, upgradeCluster, resumeCluster },
       logger: { warn: vi.fn() },
     }
     ctx.inject = (_services: string[], mount: (value: unknown) => void) => mount(ctx)
@@ -252,6 +256,13 @@ describe('AIOps Portal read model', () => {
     expect(probed.status).toBe(200)
     expect(probed.body).toMatchObject({ ok: true, agent: { name: 'prod', version: '1.2.3' } })
     expect(probe).toHaveBeenCalledWith('prod', expect.any(AbortSignal))
+
+    await expect(call(PORTAL_CLUSTER_UPGRADE_API_PATH, { name: 'prod', targetVersion: '2.0.0' }))
+      .resolves.toMatchObject({ status: 200, body: { cluster: { desiredVersion: '2.0.0', draining: true } } })
+    expect(upgradeCluster).toHaveBeenCalledWith('prod', '2.0.0')
+    await expect(call(PORTAL_CLUSTER_RESUME_API_PATH, { name: 'prod' }))
+      .resolves.toMatchObject({ status: 200, body: { cluster: { desiredVersion: '2.0.0' } } })
+    expect(resumeCluster).toHaveBeenCalledWith('prod')
   })
 
   it('summarizes active, severity, review, and audit outcomes', () => {

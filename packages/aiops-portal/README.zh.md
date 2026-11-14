@@ -8,7 +8,7 @@ Portal 不保存副本、不修改 Session，也不提供修复操作。插件�
 
 全局工作台提供 `aiops-prometheus`、`aiops-alertmanager` 和版本化 `aiops-routing` namespace 的实时设置。两个 endpoint 候选值必须通过无副作用的服务端探测才能保存；Kubernetes 只走 agent，其连通性位于**集群**页，而不是凭据表单。路由策略只有在无副作用的标准化 labels dry-run 成功后，才以 settings revision fence 原子保存；Router 会在持久化前校验并发与 Token 上限的跨字段关系。提交后实时生效并持久审计。
 
-**集群** 标签页管理集群 agent：为每个集群创建令牌，明文与安装步骤只展示一次，之后只显示集群状态（`pending`、`connected`、`offline`、`revoked`）、agent 版本与最近连接时间。全新安装时首页会显示首次配置卡片，提示创建令牌；启动时不会生成或记录任何令牌。只有从未连接过的集群才提供“重签”；连接之后只能吊销并重新创建。探测操作会实际走一次在线连接，并返回延迟、agent 版本与声明能力。创建、重签、吊销与探测的 POST 都会拒绝跨站请求。
+**集群** 标签页管理集群 agent：为每个集群创建令牌，明文与安装步骤只展示一次，之后只显示集群状态（`pending`、`connected`、`offline`、`revoked`）、agent 版本与最近连接时间。全新安装时首页会显示首次配置卡片，提示创建令牌；启动时不会生成或记录任何令牌。只有从未连接过的集群才提供“重签”；连接之后只能吊销并重新创建。探测操作会实际走一次在线连接，并返回延迟、agent 版本与声明能力。已连接的集群提供**准备升级**：填写目标版本后 agent 进入 drain（状态显示“升级中”，新的 Kubernetes 读取失败转移），界面给出应执行的 `kubectl set image` 命令；替换 agent 连接后状态自动恢复。**恢复读取** 可在同一 agent 上取消已准备的发布。创建、重签、吊销与探测的 POST 都会拒绝跨站请求。
 
 设置页显示已配置的 Alertmanager Webhook 地址，并只显示凭据是否存在。凭据值绝不会返回或保存在浏览器中；请通过部署 secret manager 或 `<DSH_HOME>/.credentials.yaml` 轮换并重启 DSH。当 Alertmanager 需要使用默认 `http://127.0.0.1:3081/alertmanager` 以外的地址时，设置 `AIOPS_WEBHOOK_PUBLIC_URL`。连接测试和 dry-run 的浏览器 POST 会拒绝跨站请求；整个 Web 表层仍必须置于部署方的 Host 认证边界之后。
 

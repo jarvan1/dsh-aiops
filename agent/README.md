@@ -4,7 +4,7 @@ English | [中文](README.zh.md)
 
 A small Go process installed in each Kubernetes cluster that connects out to one DSH AIOps server and answers bounded, read-only queries. It exists so the AIOps Host no longer needs a kubeconfig per cluster: identity comes from the agent's client name and token, and the network path only ever goes cluster → server.
 
-> **Status.** The agent, protocol v1, image, read-only RBAC, and the server-side gateway are implemented and tested. Tokens are issued in the AIOps Portal, and the server authenticates, tracks, probes, and revokes agents at `/api/aiops/agent`. Diagnosis tools now read through the agent: the router binds each alert round to its `cluster` label and the Kubernetes tools read that cluster. The host kubeconfig provider is gone. The upgrade workflow is M3. See [the protocol](docs/protocol.md) and [TODO](../TODO.md).
+> **Status.** The agent, protocol v1, image, read-only RBAC, and the server-side gateway are implemented and tested. Tokens are issued in the AIOps Portal, and the server authenticates, tracks, probes, and revokes agents at `/api/aiops/agent`. Diagnosis tools now read through the agent: the router binds each alert round to its `cluster` label and the Kubernetes tools read that cluster. The host kubeconfig provider is gone. Upgrades are operator-applied: the Portal sets the target version and drains the agent, then the operator rolls the image; `resume` restores reads if the rollout is cancelled. See [the protocol](docs/protocol.md) and [TODO](../TODO.md).
 
 ## How it works
 

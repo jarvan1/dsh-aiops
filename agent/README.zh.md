@@ -4,7 +4,7 @@
 
 安装在每个 Kubernetes 集群中的小型 Go 进程，主动连接一个 DSH AIOps server，并回答有界的只读查询。它的目的是让 AIOps Host 不再需要为每个集群维护 kubeconfig：集群身份来自 client name 与令牌，网络连接始终是集群 → server 方向。
 
-> **状态。** agent、协议 v1、镜像、只读 RBAC 与 server 侧网关均已实现并有测试覆盖。令牌在 AIOps Portal 中签发，server 在 `/api/aiops/agent` 完成认证、状态跟踪、探测与吊销。诊断工具现在通过 agent 读取：router 按告警的 `cluster` label 把每个轮次绑定到集群，Kubernetes 工具读取该集群；Host 侧 kubeconfig Provider 已删除。滚动升级流程属于 M3。参见[协议说明](docs/protocol.md)与 [TODO](../TODO.md)。
+> **状态。** agent、协议 v1、镜像、只读 RBAC 与 server 侧网关均已实现并有测试覆盖。令牌在 AIOps Portal 中签发，server 在 `/api/aiops/agent` 完成认证、状态跟踪、探测与吊销。诊断工具现在通过 agent 读取：router 按告警的 `cluster` label 把每个轮次绑定到集群，Kubernetes 工具读取该集群；Host 侧 kubeconfig Provider 已删除。升级由运维执行：Portal 设置目标版本并 drain agent，随后由运维滚动镜像；取消发布时 `resume` 恢复读取。参见[协议说明](docs/protocol.md)与 [TODO](../TODO.md)。
 
 ## 工作方式
 

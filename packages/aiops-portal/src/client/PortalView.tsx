@@ -4,7 +4,9 @@ import type { InjectFace, PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   PORTAL_API_PATH,
   PORTAL_CLUSTER_PROBE_API_PATH,
+  PORTAL_CLUSTER_RESUME_API_PATH,
   PORTAL_CLUSTER_REVOKE_API_PATH,
+  PORTAL_CLUSTER_UPGRADE_API_PATH,
   PORTAL_CLUSTER_TOKEN_API_PATH,
   PORTAL_CLUSTERS_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
@@ -267,4 +269,14 @@ export async function revokePortalCluster(name: string, signal?: AbortSignal): P
 
 export function probePortalCluster(name: string, signal?: AbortSignal): Promise<ClusterProbeResult> {
   return clusterMutation<ClusterProbeResult>(PORTAL_CLUSTER_PROBE_API_PATH, { name }, 'cluster_probe_failed', signal)
+}
+
+export async function upgradePortalCluster(name: string, targetVersion: string, signal?: AbortSignal): Promise<PortalCluster> {
+  const body = await clusterMutation<{ cluster: PortalCluster }>(PORTAL_CLUSTER_UPGRADE_API_PATH, { name, targetVersion }, 'cluster_upgrade_failed', signal)
+  return body.cluster
+}
+
+export async function resumePortalCluster(name: string, signal?: AbortSignal): Promise<PortalCluster> {
+  const body = await clusterMutation<{ cluster: PortalCluster }>(PORTAL_CLUSTER_RESUME_API_PATH, { name }, 'cluster_resume_failed', signal)
+  return body.cluster
 }

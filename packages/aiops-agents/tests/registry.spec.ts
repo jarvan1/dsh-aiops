@@ -178,6 +178,41 @@ describe('agent registry', () => {
     await expect(ctx.aiopsAgents.reissueToken('local')).rejects.toMatchObject({ code: 'token_not_reissuable' })
   })
 
+  it('prepares a rollout: persists the target version and drains the live agent', async () => {
+    root = await mkdtemp(join(tmpdir(), 'aiops-agents-'))
+    const ctx = await openRegistry(root)
+    context = ctx
+    const { token } = await ctx.aiopsAgents.createCluster('local')
+    const route = (ctx.webServer as unknown as FakeWebServer).upgrades.find(value => value.path === AGENT_WS_PATH)
+    server = createServer()
+    server.on('upgrade', (req, socket, head) => { void route?.handler(req, socket, head) })
+    await new Promise<void>(resolve => { server?.listen(0, '127.0.0.1', resolve) })
+    const address = server.address() as AddressInfo
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}${AGENT_WS_PATH}`, {
+      headers: { authorization: `Bearer ${token}` },
+    })
+    sockets.push(socket)
+    await once(socket, 'open')
+    const frames: Record<string, unknown>[] = []
+    socket.on('message', (raw: Buffer) => frames.push(JSON.parse(raw.toString()) as Record<string, unknown>))
+    socket.send(JSON.stringify(hello))
+    await vi.waitFor(() => { expect(ctx.aiopsAgents.isConnected('local')).toBe(true) })
+
+    await expect(ctx.aiopsAgents.upgradeCluster('local', 'bad version')).rejects.toMatchObject({ code: 'invalid_version' })
+    const upgraded = await ctx.aiopsAgents.upgradeCluster('local', '2.0.0')
+    expect(upgraded).toMatchObject({ status: 'connected', agentVersion: '1.2.3', desiredVersion: '2.0.0', draining: true })
+    expect(ctx.aiopsAgents.isDraining('local')).toBe(true)
+    await vi.waitFor(() => { expect(frames).toContainEqual(expect.objectContaining({ type: 'drain' })) })
+    await expect(ctx.aiopsAgents.read('local', { op: 'list', resource: 'pods' }))
+      .rejects.toMatchObject({ code: 'unreachable' })
+
+    const resumed = await ctx.aiopsAgents.resumeCluster('local')
+    expect(resumed.draining).toBeUndefined()
+    expect(resumed.desiredVersion).toBe('2.0.0')
+    await vi.waitFor(() => { expect(frames).toContainEqual(expect.objectContaining({ type: 'resume' })) })
+    expect(ctx.aiopsAgents.isDraining('local')).toBe(false)
+  })
+
   it('refuses a revoked token on the socket and drops the live connection', async () => {
     root = await mkdtemp(join(tmpdir(), 'aiops-agents-'))
     const ctx = await openRegistry(root)

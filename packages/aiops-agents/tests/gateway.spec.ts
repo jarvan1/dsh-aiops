@@ -247,6 +247,45 @@ describe('agent gateway', () => {
     await expect(reading).resolves.toEqual({ data: { items: [] }, truncated: false })
   })
 
+  it('drains a live agent, refuses reads, and resumes on request', async () => {
+    const { gateway: live, url } = await harness()
+    const { socket, inbox } = await open(url)
+    expect(live.drain('local')).toBe(true)
+    await expect(inbox.next()).resolves.toMatchObject({ type: 'drain' })
+    expect(live.isDraining('local')).toBe(true)
+    await expect(live.read('local', { op: 'list', resource: 'pods' })).rejects.toMatchObject({
+      code: 'unreachable',
+      message: expect.stringContaining('draining'),
+    })
+
+    expect(live.resume('local')).toBe(true)
+    await expect(inbox.next()).resolves.toMatchObject({ type: 'resume' })
+    expect(live.isDraining('local')).toBe(false)
+    const reading = live.read('local', { op: 'list', resource: 'pods' })
+    const request = await inbox.next()
+    socket.send(JSON.stringify({ type: 'result', id: request.id, ok: true, data: { items: [] } }))
+    await expect(reading).resolves.toEqual({ data: { items: [] }, truncated: false })
+  })
+
+  it('reports drain and resume as no-ops without a live agent', async () => {
+    const { gateway: live } = await harness()
+    expect(live.drain('local')).toBe(false)
+    expect(live.resume('local')).toBe(false)
+    expect(live.isDraining('local')).toBe(false)
+  })
+
+  it('does not carry a drain into a replacement connection', async () => {
+    const { gateway: live, url } = await harness()
+    const first = await open(url)
+    live.drain('local')
+    await first.inbox.next()
+    expect(live.isDraining('local')).toBe(true)
+    const closed = once(first.socket, 'close')
+    await open(url)
+    await closed
+    expect(live.isDraining('local')).toBe(false)
+  })
+
   it('rejects a probe that describes a different cluster than the token', async () => {
     const { gateway: live, url } = await harness()
     const { socket, inbox } = await open(url)

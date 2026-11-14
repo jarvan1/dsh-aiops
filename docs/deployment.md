@@ -99,6 +99,8 @@ Kubernetes evidence never leaves the DSH host through a kubeconfig. Every cluste
 2. Deploy `agent/deploy/rbac.yaml` and the Deployment with `AIOPS_AGENT_NAME` set to that name and `AIOPS_AGENT_SERVER` set to the `/api/aiops/agent` URL reachable **from inside the cluster**.
 3. Make alerts carry the cluster name. The incident router reads the `cluster` alert label by default (`clusterLabel` on the `aiops-incident-router` entry) and binds each round to that agent; the observation tools then read only that cluster. `AIOPS_DEFAULT_CLUSTER` (used by both the router and `aiops-kubernetes`) covers alerts without the label; leave it empty so an unlabeled alert degrades to Alertmanager/Prometheus evidence instead of reading a default cluster.
 
+To upgrade an agent, use **Prepare upgrade** in the Portal (or `POST /api/aiops/portal/clusters/upgrade` with `{name, targetVersion}`): the server stores the target version, drains the agent (in-flight reads finish, new Kubernetes reads fail over with `unreachable`), and shows the `kubectl set image` rollout to apply. The replacement agent connects with the new version and reads resume; **Resume reads** (`/clusters/resume`) restores the same agent if the rollout is cancelled. The server never replaces the image itself.
+
 The server holds no cluster credential. Revoking a cluster in the Portal drops its live agent immediately; re-issue is available only while a cluster has never connected. `/api/aiops/readyz` stays ready with zero clusters and reports `components.clusters` plus `configured`/`total`/`connected`.
 
 ## Container image

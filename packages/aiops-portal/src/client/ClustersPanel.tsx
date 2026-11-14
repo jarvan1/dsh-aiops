@@ -31,6 +31,7 @@ function actionFailure(error: unknown, t: Props['t']): string {
   switch (code) {
     case 'cluster_exists': return label(t('clusterExists'))
     case 'invalid_name': return label(t('clusterInvalidName'))
+    case 'invalid_version': return label(t('clusterInvalidVersion'))
     case 'cluster_not_found': return label(t('clusterNotFound'))
     case 'cluster_limit_reached': return label(t('clusterLimitReached'))
     case 'token_not_reissuable': return label(t('clusterTokenFixed'))
@@ -131,6 +132,9 @@ export function ClustersPanel({ clusters, needsCluster, clusterActions, onChange
   const [failure, setFailure] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
   const [probes, setProbes] = useState<Record<string, ClusterProbeResult>>({})
+  const [upgrading, setUpgrading] = useState<string | null>(null)
+  const [targetVersion, setTargetVersion] = useState('')
+  const [rollout, setRollout] = useState<{ name: string; version: string } | null>(null)
 
   const reissue = async (name: string): Promise<void> => {
     setBusy(name)
@@ -151,6 +155,34 @@ export function ClustersPanel({ clusters, needsCluster, clusterActions, onChange
       await clusterActions.revokeCluster(name)
       setConfirm(null)
       setProbes(current => { const next = { ...current }; delete next[name]; return next })
+      onChanged()
+    } catch (error: unknown) {
+      setFailure(actionFailure(error, t))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const upgrade = async (name: string): Promise<void> => {
+    setBusy(name)
+    setFailure(null)
+    try {
+      await clusterActions.upgradeCluster(name, targetVersion)
+      setRollout({ name, version: targetVersion })
+      setUpgrading(null)
+      setTargetVersion('')
+      onChanged()
+    } catch (error: unknown) {
+      setFailure(actionFailure(error, t))
+    } finally {
+      setBusy(null)
+    }
+  }
+  const resume = async (name: string): Promise<void> => {
+    setBusy(name)
+    setFailure(null)
+    try {
+      await clusterActions.resumeCluster(name)
+      setRollout(null)
       onChanged()
     } catch (error: unknown) {
       setFailure(actionFailure(error, t))
@@ -181,6 +213,16 @@ export function ClustersPanel({ clusters, needsCluster, clusterActions, onChange
     </div>
     {failure === null ? null : <div className={css.error}>{failure}</div>}
     <ClusterCreator clusterActions={clusterActions} onChanged={onChanged} onIssued={onIssued} t={t}/>
+    {upgrading === null ? null : <form className={css.upgradeForm} onSubmit={event => { event.preventDefault() }}>
+      <div><strong>{t('clusterUpgradeTitle', { name: upgrading })}</strong><p>{t('clusterUpgradeHint')}</p></div>
+      <input value={targetVersion} onChange={event => { setTargetVersion(event.target.value) }} placeholder={t('clusterUpgradePlaceholder')} aria-label={t('clusterUpgradeVersion')} aria-invalid={targetVersion !== '' && !/^[A-Za-z0-9._+-]{1,64}$/.test(targetVersion)}/>
+      <button type="submit" disabled={!/^[A-Za-z0-9._+-]{1,64}$/.test(targetVersion) || busy === upgrading} onClick={() => { void upgrade(upgrading) }}>{t('clusterUpgradeConfirm')}</button>
+      <button type="button" onClick={() => { setUpgrading(null) }}>{t('clusterCancel')}</button>
+    </form>}
+    {rollout === null ? null : <div className={css.rolloutNotice}>
+      <p>{t('clusterUpgradeRollout', { version: rollout.version })}</p>
+      <pre>{`kubectl -n aiops set image deployment/aiops-agent agent=<IMAGE>:${rollout.version}`}</pre>
+    </div>}
     {clusters.length === 0
       ? <div className={css.empty}>{needsCluster ? t('clusterEmptyFirst') : t('clusterEmpty')}</div>
       : <div className={css.clusterTable}>
@@ -189,14 +231,17 @@ export function ClustersPanel({ clusters, needsCluster, clusterActions, onChange
         </div>
         {clusters.map(cluster => {
           const probeState = probeText(probes[cluster.name], t)
+          const pending = cluster.desiredVersion !== undefined && cluster.desiredVersion !== cluster.agentVersion
           return <div className={css.clusterRow} role="row" key={cluster.name}>
             <strong>{cluster.name}</strong>
-            <span><span className={`${css.badge} ${css[`tone_${cluster.status}`] ?? ''}`}>{t(`clusterStatus_${cluster.status}` as 'clusterStatus_connected')}</span></span>
-            <span>{cluster.agentVersion ?? '—'}</span>
+            <span><span className={`${css.badge} ${css[cluster.draining === true ? 'tone_draining' : `tone_${cluster.status}`] ?? ''}`}>{cluster.draining === true ? t('clusterStatus_draining') : t(`clusterStatus_${cluster.status}` as 'clusterStatus_connected')}</span></span>
+            <span>{cluster.agentVersion ?? '—'}{pending ? <small className={css.versionPending}> → {cluster.desiredVersion}</small> : null}</span>
             <span>{cluster.lastSeenAt === undefined ? '—' : fmtTime(cluster.lastSeenAt)}</span>
             <span className={css.clusterActions}>
               {probeState === undefined ? null : <span className={probeState.tone}>{probeState.text}</span>}
               {cluster.status === 'connected' ? <button type="button" disabled={busy === cluster.name} onClick={() => { void probe(cluster.name) }}>{t('clusterProbe')}</button> : null}
+              {cluster.status === 'connected' && cluster.draining === true ? <button type="button" disabled={busy === cluster.name} onClick={() => { void resume(cluster.name) }}>{t('clusterResume')}</button> : null}
+              {cluster.status === 'connected' && cluster.draining !== true ? <button type="button" disabled={busy === cluster.name} onClick={() => { setUpgrading(cluster.name); setTargetVersion(cluster.desiredVersion ?? '') }}>{t('clusterUpgrade')}</button> : null}
               {cluster.status === 'pending' ? <button type="button" disabled={busy === cluster.name} onClick={() => { void reissue(cluster.name) }}>{t('clusterReissue')}</button> : null}
               {cluster.status === 'revoked' ? null : confirm === cluster.name
                 ? <><button type="button" className={css.danger} disabled={busy === cluster.name} onClick={() => { void revoke(cluster.name) }}>{t('clusterRevokeConfirm')}</button><button type="button" onClick={() => { setConfirm(null) }}>{t('clusterCancel')}</button></>

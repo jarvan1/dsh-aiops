@@ -226,5 +226,6 @@ An agent that is refused before the upgrade sees plain HTTP `401` and exits non-
 - Cluster rows move through `pending` (token issued, never connected), `connected`, `offline`, and `revoked`; the Portal renders them and never receives a token or digest.
 - Reads are correlated by `id` with a request deadline (30s default); `busy` is translated to `unreachable`. A missing or replaced connection also answers `unreachable`, so a diagnosis fails over instead of stalling.
 - The inbound frame cap is 4 MiB, sized for the agent's 2 MB Kubernetes body cap plus JSON overhead.
-- Server pings run every 30s; silence past the idle window terminates the socket. `drain`/`resume` and the upgrade state machine remain M3.
+- Server pings run every 30s; silence past the idle window terminates the socket.
+- Upgrades are operator-applied (path A): setting a target version persists `desiredVersion`, sends `drain`, and advertises the version in the next `welcome`; the gateway refuses new reads while draining, the rollout replaces the Pod, and the replacement connection starts outside any drain. `resume` restores reads when a rollout is cancelled.
 - The server logs `clientId`, `name`, and `version` — never the token.

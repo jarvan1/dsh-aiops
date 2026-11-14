@@ -64,7 +64,7 @@ export const aiopsAgentDomainSpec = defineDomain({
 
 /** Registry failures an HTTP layer maps onto status codes. */
 export class AgentRegistryError extends Error {
-  readonly code: 'invalid_name' | 'cluster_exists' | 'cluster_not_found' | 'cluster_limit_reached' | 'token_not_reissuable'
+  readonly code: 'invalid_name' | 'invalid_version' | 'cluster_exists' | 'cluster_not_found' | 'cluster_limit_reached' | 'token_not_reissuable'
   constructor(code: AgentRegistryError['code'], message: string) {
     super(message)
     this.name = 'AgentRegistryError'
@@ -88,12 +88,22 @@ export interface AiopsAgentsApi {
   revokeCluster(name: string): Promise<AgentClusterView>
   /** Set the version an agent should run; reported to it on the next hello. */
   setDesiredVersion(name: string, version: string | undefined): Promise<AgentClusterView>
+  /**
+   * Prepare a rollout: persist the target version, then drain the live agent so
+   * in-flight reads finish while new reads fail over. The operator applies the
+   * image; a reconnecting agent reports the new version.
+   */
+  upgradeCluster(name: string, targetVersion: string): Promise<AgentClusterView>
+  /** Allow reads again after a cancelled rollout. */
+  resumeCluster(name: string): Promise<AgentClusterView>
   /** Ask the connected agent to describe itself. */
   probe(name: string, signal?: AbortSignal): Promise<AgentProbeResult>
   /** Run one bounded read through the connected agent. */
   read(name: string, request: AgentReadRequest, signal?: AbortSignal): Promise<AgentReadResult>
   /** Whether a validated agent connection is live for this cluster. */
   isConnected(name: string): boolean
+  /** Whether the live agent is draining for a rollout. */
+  isDraining(name: string): boolean
 }
 
 /** Registry limits; each is enforced before a record or a read is accepted. */
@@ -255,6 +265,29 @@ export class AiopsAgents extends Service implements AiopsAgentsApi {
     return this.view(next)
   }
 
+  async upgradeCluster(name: string, targetVersion: string): Promise<AgentClusterView> {
+    const version = targetVersion.trim()
+    if (!/^[A-Za-z0-9._+-]{1,64}$/.test(version)) {
+      throw new AgentRegistryError('invalid_version', 'target version must be 1 to 64 characters of letters, digits, dot, underscore, plus, or hyphen')
+    }
+    await this.setDesiredVersion(name, version)
+    // Draining is best effort: an offline cluster picks the target version up
+    // on its next hello, and a read against a draining agent fails explicitly.
+    this.gateway.drain(name)
+    return this.cluster(name) ?? this.requireCluster(name)
+  }
+
+  async resumeCluster(name: string): Promise<AgentClusterView> {
+    this.requireCluster(name)
+    this.gateway.resume(name)
+    return this.cluster(name) ?? this.requireCluster(name)
+  }
+
+  /** Whether the live agent is draining for a rollout. */
+  isDraining(name: string): boolean {
+    return this.gateway.isDraining(name)
+  }
+
   async setDesiredVersion(name: string, version: string | undefined): Promise<AgentClusterView> {
     const record = this.clusters.get(name)
     if (record === undefined) throw new AgentRegistryError('cluster_not_found', `cluster ${name} is not registered`)
@@ -343,9 +376,16 @@ export class AiopsAgents extends Service implements AiopsAgentsApi {
     return cluster
   }
 
+  private requireCluster(name: string): AgentClusterView {
+    const cluster = this.cluster(name)
+    if (cluster === undefined) throw new AgentRegistryError('cluster_not_found', `cluster ${name} is not registered`)
+    return cluster
+  }
+
   private view(record: AgentClusterRecord): AgentClusterView {
+    const connected = this.gateway?.isConnected(record.name) === true
     const status: AgentClusterStatus = record.revokedAt !== undefined ? 'revoked'
-      : this.gateway?.isConnected(record.name) === true ? 'connected'
+      : connected ? 'connected'
         : record.lastSeenAt === undefined ? 'pending' : 'offline'
     return {
       name: record.name,
@@ -357,6 +397,7 @@ export class AiopsAgents extends Service implements AiopsAgentsApi {
       ...(record.protocol === undefined ? {} : { protocol: record.protocol }),
       ...(record.capabilities === undefined ? {} : { capabilities: record.capabilities }),
       ...(record.desiredVersion === undefined ? {} : { desiredVersion: record.desiredVersion }),
+      ...(connected && this.gateway.isDraining(record.name) ? { draining: true } : {}),
     }
   }
 

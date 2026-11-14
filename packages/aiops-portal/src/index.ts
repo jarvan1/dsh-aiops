@@ -10,7 +10,9 @@ import { testEndpointConnection } from './connectivity.ts'
 import {
   PORTAL_API_PATH,
   PORTAL_CLUSTER_PROBE_API_PATH,
+  PORTAL_CLUSTER_RESUME_API_PATH,
   PORTAL_CLUSTER_REVOKE_API_PATH,
+  PORTAL_CLUSTER_UPGRADE_API_PATH,
   PORTAL_CLUSTER_TOKEN_API_PATH,
   PORTAL_CLUSTERS_API_PATH,
   PORTAL_CONNECTION_TEST_API_PATH,
@@ -129,6 +131,14 @@ export async function testPortalConnection(
 }
 
 
+/** Read a `{ name, targetVersion }` upgrade body. */
+function upgradeRequest(value: unknown): { name: string; targetVersion: string } | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const name = Reflect.get(value, 'name')
+  const targetVersion = Reflect.get(value, 'targetVersion')
+  return typeof name === 'string' && typeof targetVersion === 'string' ? { name, targetVersion } : undefined
+}
+
 /** Read a `{ name }` request body; shape validation stays in the registry. */
 function clusterNameFrom(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
@@ -139,6 +149,7 @@ function clusterNameFrom(value: unknown): string | undefined {
 function registryStatus(error: AgentRegistryError): number {
   switch (error.code) {
     case 'invalid_name': return 400
+    case 'invalid_version': return 400
     case 'cluster_not_found': return 404
     case 'cluster_exists': return 409
     case 'cluster_limit_reached': return 409
@@ -412,5 +423,55 @@ export function apply(ctx: Context, config: Config): void {
         }
       },
     }), `aiops-portal: ${PORTAL_CLUSTER_PROBE_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_CLUSTER_UPGRADE_API_PATH,
+      async handler(req, res) {
+        if (req.method !== 'POST') {
+          res.setHeader('allow', 'POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
+        try {
+          const value = upgradeRequest(await readJsonBody(req))
+          if (value === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          json(res, 200, { cluster: await webCtx.aiopsAgents.upgradeCluster(value.name, value.targetVersion) }, false)
+        } catch (error: unknown) {
+          writeRequestFailure(res, error)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_CLUSTER_UPGRADE_API_PATH}`)
+    webCtx.effect(() => webCtx.webServer.register({
+      kind: 'exact',
+      path: PORTAL_CLUSTER_RESUME_API_PATH,
+      async handler(req, res) {
+        if (req.method !== 'POST') {
+          res.setHeader('allow', 'POST')
+          json(res, 405, { error: 'method_not_allowed' }, false)
+          return
+        }
+        if (!trustedPost(req)) {
+          json(res, 403, { error: 'cross_site_request_rejected' }, false)
+          return
+        }
+        try {
+          const name = await clusterNameBody(req)
+          if (name === undefined) {
+            json(res, 400, { error: 'invalid_request' }, false)
+            return
+          }
+          json(res, 200, { cluster: await webCtx.aiopsAgents.resumeCluster(name) }, false)
+        } catch (error: unknown) {
+          writeRequestFailure(res, error)
+        }
+      },
+    }), `aiops-portal: ${PORTAL_CLUSTER_RESUME_API_PATH}`)
   })
 }

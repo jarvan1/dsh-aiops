@@ -4,6 +4,19 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-14 — Agent upgrade state machine (M3)
+
+### Added
+
+- Added operator-applied agent upgrades (path A). `POST /api/aiops/portal/clusters/upgrade` persists the target version, sends `drain` to the live agent, and returns the cluster row; the gateway refuses new reads with `unreachable` while draining and a replacement connection never inherits the drain. `POST /clusters/resume` restores reads on the same agent when a rollout is cancelled.
+- The cluster view now reports `draining` and the persisted `desiredVersion`; the Portal's Clusters tab shows `Draining` status, the pending target version, a target-version form, a Resume action, and the `kubectl set image` rollout to apply. The replacement agent connects with the new version and the status recovers; the server never replaces the image itself.
+- `welcome` already advertised `desiredVersion`; it is now set through the Portal flow and covered end to end.
+
+### Validation
+
+- New gateway tests cover drain/resume frames, read refusal while draining, no-op drain without a connection, and a replacement connection starting outside the drain; registry tests cover target persistence, invalid version rejection, and resume. The Portal route test covers both new endpoints. The workspace suite passes 26 files and 203 tests.
+- A real k3s v1.36 acceptance run drove the whole flow: agent 1.0.0 connected and read kube-system pods, `upgradeCluster('local','2.0.0')` drained it and reads failed with `unreachable`, the 1.0.0 process exited, a 2.0.0 binary connected with the same token, reads resumed, and a second upgrade followed by `resume` restored reads on the still-running agent. The agent/RBAC resources were removed afterwards.
+
 ## Unreleased — 2026-11-14 — Cluster-agent Kubernetes reads (M2)
 
 ### Changed

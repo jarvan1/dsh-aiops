@@ -73,7 +73,7 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 ## 多集群接入
 
-每个集群（包括运行 DSH 的那个）都通过只主动向外连接的 Go agent 读取，而不是 Host 侧的 kubeconfig。Portal 为每个集群签发一个令牌并只展示一次；`aiops_agent` 存储域只保留其 SHA-256 摘要、末四位、时间戳与最近上报的 agent 版本。agent 连接 `/api/aiops/agent`，用该令牌认证，并声明名称、版本与能力集；server 将名称绑定到令牌，跟踪 `pending`/`connected`/`offline`/`revoked` 状态，并在这条连接上执行类型化的 `get`/`list`/`events`/`logs` 读取与 `probe`。不存在 path、URL、verb 或 exec 透传，server 也不持有任何集群凭据。全新安装在没有集群的情况下正常启动，绝不生成或记录令牌，并在 Portal 中显示首次配置提示；agent 的 server 地址始终显式配置，且必须能从集群内部访问。诊断工具通过该 agent 读取：router 把每个轮次绑定到告警 `cluster` label 指定的集群（router 上的 `clusterLabel`/`defaultCluster`），观测工具透传该绑定，因此一次诊断无法读取其他集群。未知或非法的 label 不绑定任何集群，Kubernetes 证据会显式失败，而不是回退到默认集群。参见[决策记录](decisions/2026-11-14-aiops-cluster-agent-gateway.zh.md)与 [agent 指南](../agent/README.zh.md)。
+每个集群（包括运行 DSH 的那个）都通过只主动向外连接的 Go agent 读取，而不是 Host 侧的 kubeconfig。Portal 为每个集群签发一个令牌并只展示一次；`aiops_agent` 存储域只保留其 SHA-256 摘要、末四位、时间戳与最近上报的 agent 版本。agent 连接 `/api/aiops/agent`，用该令牌认证，并声明名称、版本与能力集；server 将名称绑定到令牌，跟踪 `pending`/`connected`/`offline`/`revoked` 状态，并在这条连接上执行类型化的 `get`/`list`/`events`/`logs` 读取与 `probe`。不存在 path、URL、verb 或 exec 透传，server 也不持有任何集群凭据。全新安装在没有集群的情况下正常启动，绝不生成或记录令牌，并在 Portal 中显示首次配置提示；agent 的 server 地址始终显式配置，且必须能从集群内部访问。诊断工具通过该 agent 读取：router 把每个轮次绑定到告警 `cluster` label 指定的集群（router 上的 `clusterLabel`/`defaultCluster`），观测工具透传该绑定，因此一次诊断无法读取其他集群。未知或非法的 label 不绑定任何集群，Kubernetes 证据会显式失败，而不是回退到默认集群。升级由运维执行：Portal 持久化目标版本并 drain agent，让在途读取完成、新读取失败转移，同时给出滚动发布命令；替换 agent 以新版本连接后自动清除 drain。参见[决策记录](decisions/2026-11-14-aiops-cluster-agent-gateway.zh.md)与 [agent 指南](../agent/README.zh.md)。
 
 ## 事件状态
 

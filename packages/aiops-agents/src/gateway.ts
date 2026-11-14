@@ -106,6 +106,8 @@ interface LiveAgent {
   lastHeartbeatAt: number
   lastMessageAt: number
   alive: boolean
+  /** New reads are refused while the operator prepares a rollout. */
+  draining: boolean
 }
 
 const DEFAULTS = {
@@ -213,6 +215,33 @@ export class AgentGateway {
     return { name: value.name, version: value.version, protocol: value.protocol, capabilities }
   }
 
+  /** Whether the live agent is draining for a rollout. */
+  isDraining(name: string): boolean {
+    return this.live.get(name)?.draining === true
+  }
+
+  /**
+   * Ask one connected agent to drain: in-flight reads finish, new reads are
+   * refused locally and by the agent, and the rollout can replace the pod
+   * without failing a diagnosis. Returns false when no agent is connected.
+   */
+  drain(name: string): boolean {
+    const agent = this.live.get(name)
+    if (agent === undefined) return false
+    if (!this.write(agent, { type: 'drain' })) return false
+    agent.draining = true
+    return true
+  }
+
+  /** Allow reads again, for example when a rollout is cancelled. */
+  resume(name: string): boolean {
+    const agent = this.live.get(name)
+    if (agent === undefined) return false
+    if (!this.write(agent, { type: 'resume' })) return false
+    agent.draining = false
+    return true
+  }
+
   /**
    * Drop one connection immediately. A revoked cluster must not keep answering
    * reads even for the seconds a graceful close would take.
@@ -304,6 +333,7 @@ export class AgentGateway {
       lastHeartbeatAt: now,
       lastMessageAt: now,
       alive: true,
+      draining: false,
     }
     this.live.set(identity.name, agent)
     this.write(agent, {
@@ -379,6 +409,9 @@ export class AgentGateway {
     const agent = this.live.get(name)
     if (agent === undefined) {
       return Promise.reject(new AgentQueryError('unreachable', `cluster agent ${name} is not connected.`))
+    }
+    if (agent.draining) {
+      return Promise.reject(new AgentQueryError('unreachable', `cluster agent ${name} is draining for an upgrade and is not accepting reads.`))
     }
     if (agent.pending.size >= this.options.maxPendingRequests) {
       return Promise.reject(new AgentQueryError('unreachable', `cluster agent ${name} already has ${agent.pending.size} reads in flight.`))

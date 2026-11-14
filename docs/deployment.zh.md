@@ -75,6 +75,8 @@ Kubernetes 证据不再通过 Host 侧 kubeconfig 读取。每个集群（包括
 2. 部署 `agent/deploy/rbac.yaml` 与 Deployment，`AIOPS_AGENT_NAME` 设为该名称，`AIOPS_AGENT_SERVER` 设为**从集群内部**可访问的 `/api/aiops/agent` 地址。
 3. 让告警携带集群名。incident router 默认读取 `cluster` 告警 label（`aiops-incident-router` 条目的 `clusterLabel`），把每个轮次绑定到该 agent；观测工具随后只读取该集群。`AIOPS_DEFAULT_CLUSTER`（router 与 `aiops-kubernetes` 共用）用于没有该 label 的告警；留空可让未标注集群的告警显式退化为 Alertmanager/Prometheus 证据，而不是读取默认集群。
 
+升级 agent：在 Portal 中使用**准备升级**（或 `POST /api/aiops/portal/clusters/upgrade`，body 为 `{name, targetVersion}`）。server 保存目标版本、drain agent（在途读取完成，新的 Kubernetes 读取以 `unreachable` 失败转移），并给出应执行的 `kubectl set image` 滚动命令。替换 agent 以新版本连接后读取自动恢复；若取消发布，**恢复读取**（`/clusters/resume`）会让同一 agent 恢复。server 本身从不替换镜像。
+
 server 不持有任何集群凭据。在 Portal 中吊销集群会立即断开其在线 agent；只有从未连接过的集群才能重签令牌。零集群时 `/api/aiops/readyz` 仍为 ready，并报告 `components.clusters` 与 `configured`/`total`/`connected`。
 
 ## 容器镜像

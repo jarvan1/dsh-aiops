@@ -189,6 +189,14 @@
 .tone_pending { border-color: color-mix(in srgb, var(--portal-info) 60%, transparent); color: var(--portal-info); }
 .tone_offline { border-color: color-mix(in srgb, var(--portal-warning) 60%, transparent); color: var(--portal-warning); }
 .tone_revoked { border-color: var(--dsw-alias-border-l2); color: var(--dsw-alias-label-tertiary); }
+.tone_draining { border-color: color-mix(in srgb, var(--portal-warning) 60%, transparent); color: var(--portal-warning); }
+.versionPending { color: var(--portal-warning); font-size: 11px; }
+.upgradeForm { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 240px) auto auto; align-items: end; gap: 8px; margin-bottom: 14px; padding: 14px 16px; border: .5px solid color-mix(in srgb, var(--portal-info) 40%, transparent); border-radius: 12px; background: var(--dsw-alias-bg-base); }
+.upgradeForm p { margin: 4px 0 0; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.upgradeForm input { width: 100%; padding: 0 11px; }
+.rolloutNotice { display: grid; gap: 6px; margin-bottom: 14px; padding: 12px 14px; border: .5px solid color-mix(in srgb, var(--portal-warning) 45%, transparent); border-radius: 10px; background: color-mix(in srgb, var(--portal-warning) 7%, var(--dsw-alias-bg-base)); }
+.rolloutNotice p { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+.rolloutNotice pre { margin: 0; overflow: auto; padding: 8px 10px; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; white-space: pre; }
 
 @keyframes aiopsPortalSpin { to { transform: rotate(360deg); } }
 
@@ -208,6 +216,7 @@
   .auditTable { overflow-x: auto; }
   .auditHead, .auditRow { min-width: 760px; }
   .clusterTable { overflow-x: auto; }
+  .upgradeForm { grid-template-columns: 1fr; }
   .clusterHead, .clusterRow { min-width: 820px; }
   .tokenRow { grid-template-columns: 1fr; }
 }

@@ -16,6 +16,8 @@ export const PORTAL_CLUSTERS_API_PATH = '/api/aiops/portal/clusters'
 export const PORTAL_CLUSTER_TOKEN_API_PATH = '/api/aiops/portal/clusters/token'
 export const PORTAL_CLUSTER_REVOKE_API_PATH = '/api/aiops/portal/clusters/revoke'
 export const PORTAL_CLUSTER_PROBE_API_PATH = '/api/aiops/portal/clusters/probe'
+export const PORTAL_CLUSTER_UPGRADE_API_PATH = '/api/aiops/portal/clusters/upgrade'
+export const PORTAL_CLUSTER_RESUME_API_PATH = '/api/aiops/portal/clusters/resume'
 
 /** One registered cluster, as the Portal may display it (never the token). */
 export type PortalCluster = AgentClusterView

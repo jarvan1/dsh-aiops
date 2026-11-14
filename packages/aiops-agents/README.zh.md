@@ -77,6 +77,6 @@ AIOps Portal 挂载本服务并暴露运维入口：快照中的集群列表，�
 
 - **连接归属单个副本。** 在线 socket 是进程内状态。多副本部署时，读请求只有在持有该 agent socket 的副本上才能成功；在共享连接路由出现之前，请把诊断流量路由到该副本，或只运行一个副本。
 - **诊断读取已接入（M2）。** `dsh-aiops-kubernetes` 解析轮次的集群绑定并通过本服务执行读取；`probe` 支撑 Portal 中的集群连通性。
-- **没有升级状态机。** `desiredVersion` 会被保存并在 `welcome` 中下发，但 `drain`/`resume` 协调与 Portal 升级流程属于 M3；agent 按设计拒绝自升级。
+- **升级由运维执行（path A）。** `upgradeCluster` 持久化目标版本、在下一次 `welcome` 中下发，并发送 `drain`，让在途读取完成、新读取失败转移。server 从不替换镜像：运维执行滚动发布后，新 agent 连接即清除 drain；`resumeCluster` 在取消发布时恢复读取。
 - **TLS 由部署方负责。** 路由使用 host webserver 的监听器；请通过 host 的 `tls` 配置或反向代理终止 TLS，让 agent 可以使用 `wss`。
 - **令牌没有轮换周期。** 一个令牌属于一个集群，直到被吊销；已连接过的集群通过“吊销后重新创建”完成轮换。

@@ -170,7 +170,10 @@ export interface AgentClusterView {
   readonly agentVersion?: string
   readonly protocol?: number
   readonly capabilities?: AgentCapabilities
+  /** Version the operator asked this cluster to run, if any. */
   readonly desiredVersion?: string
+  /** True while the live agent is draining for a rollout. */
+  readonly draining?: boolean
 }
 
 /** Result of issuing a token; the plaintext is returned exactly once. */

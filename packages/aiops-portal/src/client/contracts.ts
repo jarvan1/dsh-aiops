@@ -25,6 +25,8 @@ export interface ClusterActions {
   reissueClusterToken: (name: string, signal?: AbortSignal) => Promise<PortalClusterToken>
   revokeCluster: (name: string, signal?: AbortSignal) => Promise<PortalCluster>
   probeCluster: (name: string, signal?: AbortSignal) => Promise<ClusterProbeResult>
+  upgradeCluster: (name: string, targetVersion: string, signal?: AbortSignal) => Promise<PortalCluster>
+  resumeCluster: (name: string, signal?: AbortSignal) => Promise<PortalCluster>
 }
 
 export interface PortalViewInjected {

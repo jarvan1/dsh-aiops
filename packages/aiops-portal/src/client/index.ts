@@ -15,7 +15,9 @@ import {
   fetchWebhookConfiguration,
   probePortalCluster,
   reissuePortalClusterToken,
+  resumePortalCluster,
   revokePortalCluster,
+  upgradePortalCluster,
   PortalView,
 } from './PortalView.tsx'
 
@@ -40,6 +42,8 @@ export function apply(ctx: Context): void {
       reissueClusterToken: reissuePortalClusterToken,
       revokeCluster: revokePortalCluster,
       probeCluster: probePortalCluster,
+      upgradeCluster: upgradePortalCluster,
+      resumeCluster: resumePortalCluster,
     },
     prometheusSettings,
     alertmanagerSettings,

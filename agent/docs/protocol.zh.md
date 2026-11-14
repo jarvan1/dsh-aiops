@@ -226,5 +226,6 @@ server 使用应用层关闭码，让双方能区分“策略决定”与“传�
 - 集群记录在 `pending`（已签发未连接）、`connected`、`offline`、`revoked` 之间流转；Portal 只渲染这些状态，永远拿不到令牌或摘要。
 - 读请求按 `id` 关联并带截止时间（默认 30s）；`busy` 翻译为 `unreachable`。连接缺失或被替换同样返回 `unreachable`，使诊断失败转移而不是挂起。
 - 入站帧上限为 4 MiB，对应 agent 2 MB 的 Kubernetes 响应上限加 JSON 开销。
-- server 每 30s 发送一次 ping；超过空闲窗口即终止连接。`drain`/`resume` 与升级状态机属于 M3。
+- server 每 30s 发送一次 ping；超过空闲窗口即终止连接。
+- 升级由运维执行（path A）：设置目标版本会持久化 `desiredVersion`、发送 `drain`，并在下一次 `welcome` 中下发该版本；drain 期间网关拒绝新读取，滚动发布替换 Pod 后，新连接不继承 drain。取消发布时发送 `resume` 恢复读取。
 - server 记录 `clientId`、`name`、`version` —— 绝不记录令牌。
