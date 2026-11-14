@@ -9,7 +9,7 @@ The project follows semantic-versioning conventions. Changes that have not yet b
 ### Added
 
 - Added DingTalk signature security to `aiops-delivery`: `signSecretEnv` names the credential holding the bot's `SEC...` signing secret, and each attempt appends a fresh `timestamp` plus HMAC-SHA256 `sign` to the webhook URL. The secret is resolved per delivery, never appears in the URL or logs, and a configured but unresolvable secret disables the push instead of sending a message DingTalk will reject. Keyword security remains supported without `signSecretEnv`; both message title and body contain `[AIOps]`, so setting the bot keyword to `AIOps` satisfies the check. The setting is exposed through the bundle patches as `AIOPS_DINGTALK_SIGN_SECRET`.
-- Added GitHub Actions: `ci.yml` builds the bundle and rewrites workspace imports, runs the workspace tests, checks documentation links, runs `go vet`/`go test -race` for the agent, and lints plus renders both Helm charts (including the existing-secret, no-persistence, and Gateway API variants). `images.yml` builds both container images on every change and publishes them to GHCR on `main` and version tags, with build cache and no push from pull requests.
+- Added GitHub Actions: `ci.yml` builds the bundle and rewrites workspace imports, runs the workspace tests, checks documentation links, runs `go vet`/`go test -race` for the agent, and lints plus renders both Helm charts (including the existing-secret, no-persistence, and Gateway API variants). `images.yml` builds and publishes both container images to GHCR only when a version tag (`v*`) is pushed; pushes to `main` and pull requests do not build images.
 
 ### Validation
 
