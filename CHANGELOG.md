@@ -15,6 +15,7 @@ The project follows semantic-versioning conventions. Changes that have not yet b
 ### Validation
 
 - New gateway tests cover drain/resume frames, read refusal while draining, no-op drain without a connection, and a replacement connection starting outside the drain; registry tests cover target persistence, invalid version rejection, and resume. The Portal route test covers both new endpoints. The workspace suite passes 26 files and 203 tests.
+- Added [`deploy/k8s/`](deploy/k8s/README.md): a server Deployment with a persistent `DSH_HOME`, Service, probes, secret reference, trusted-host guidance, and the image-import steps for a local k3s without registry access, plus the agent install order.
 - A k3s deployment run placed the real agent in a Pod inside the local cluster (committed RBAC, in-cluster service-account token, distroless image, statically linked agent binary mounted through hostPath) pointed at the server on the node IP over `ws`: the Pod connected, probed, read kube-system pods, rejected a Secrets read with `unsupported_resource`, and exited after revocation. The namespace, RBAC, token, and Pod were removed afterwards.
 - A real k3s v1.36 acceptance run drove the whole flow: agent 1.0.0 connected and read kube-system pods, `upgradeCluster('local','2.0.0')` drained it and reads failed with `unreachable`, the 1.0.0 process exited, a 2.0.0 binary connected with the same token, reads resumed, and a second upgrade followed by `resume` restored reads on the still-running agent. The agent/RBAC resources were removed afterwards.
 

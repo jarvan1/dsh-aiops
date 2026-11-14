@@ -103,6 +103,8 @@ To upgrade an agent, use **Prepare upgrade** in the Portal (or `POST /api/aiops/
 
 The server holds no cluster credential. Revoking a cluster in the Portal drops its live agent immediately; re-issue is available only while a cluster has never connected. `/api/aiops/readyz` stays ready with zero clusters and reports `components.clusters` plus `configured`/`total`/`connected`.
 
+A Kubernetes example that runs this image with a persistent `DSH_HOME`, exposes the Portal, and installs the cluster agent into the same cluster is in [`deploy/k8s/`](../deploy/k8s/README.md), including the image-import steps for a local k3s without registry access.
+
 ## Container image
 
 The repository ships a multi-stage `Dockerfile` that builds the GitHub source bundle on `node:24-slim`, pre-seeds a DSH Web profile at build time, and boots it through `docker-entrypoint.sh` — the first container start needs no network. Sessions, SQLite stores, settings, and `.credentials.yaml` all live under the `DSH_HOME` volume (`/data`):
