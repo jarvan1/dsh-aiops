@@ -6,7 +6,7 @@
 
 ## 前置条件
 
-- 由 [`Dockerfile`](../../Dockerfile) 构建的 server 镜像，并已加载进集群。若节点无法访问公网 registry：
+- 由 [`Dockerfile`](../../Dockerfile) 构建的 server 镜像，并已加载进集群。清单中的 `image:` 标签必须与你构建、导入的标签一致；不一致会让 Pod 停在 `ImagePullBackOff` 并尝试从 Docker Hub 拉取。若节点无法访问公网 registry：
 
   ```sh
   docker build -t dsh-aiops:0.2.0-rc.1 .

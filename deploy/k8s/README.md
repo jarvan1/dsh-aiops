@@ -6,7 +6,7 @@ This example runs the AIOps server ([`dsh-aiops.yaml`](dsh-aiops.yaml)) as one D
 
 ## Prerequisites
 
-- A built server image from [`Dockerfile`](../../Dockerfile), loaded into the cluster. Without a registry reachable from the nodes:
+- A built server image from [`Dockerfile`](../../Dockerfile), loaded into the cluster. Keep the `image:` tag in [`dsh-aiops.yaml`](dsh-aiops.yaml) equal to the tag you built and imported; a mismatch parks the Pod in `ImagePullBackOff` and the cluster tries to pull from Docker Hub. Without a registry reachable from the nodes:
 
   ```sh
   docker build -t dsh-aiops:0.2.0-rc.1 .
