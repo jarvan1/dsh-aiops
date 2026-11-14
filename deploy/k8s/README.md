@@ -69,6 +69,6 @@ This example runs the AIOps server ([`dsh-aiops.yaml`](dsh-aiops.yaml)) as one D
 
 ## Local k3s notes
 
-- If the cluster cannot pull public images, import the images as shown above. The local-path provisioner also needs a helper image; if provisioning fails, use a StorageClass whose helper image is present or a hostPath volume for a throwaway test.
+- If the cluster cannot pull public images, import the images as shown above. The cluster's `local-path` provisioner also creates helper pods from `rancher/mirrored-library-busybox:1.37.0` (see `kube-system/local-path-config`); import that image too, or the claim stays Pending with `trying and failing to pull image`. `WaitForFirstConsumer` means the claim binds only once a Pod mounts it.
 - If the host intercepts DNS (for example a transparent proxy answering with `198.18.0.0/15` addresses), in-cluster Service names may resolve to the proxy's fake IP. Use the Service ClusterIP or the node address in `AIOPS_AGENT_SERVER` and add that authority to `DSH_TRUSTED_HOSTS`.
-- A verified local run deployed the server image into k3s, issued a token through the deployed Portal API, connected an agent Pod with the committed RBAC and its service-account token, probed it, drained it, replaced the binary with 2.0.0, and revoked it.
+- A verified local run deployed the server image into k3s (once with a hostPath volume, then again with the manifest's real PVC after importing the helper image), issued a token through the deployed Portal API, connected an agent Pod with the committed RBAC and its service-account token, probed it, drained it, replaced the binary with 2.0.0, and revoked it.

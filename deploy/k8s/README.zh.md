@@ -69,6 +69,6 @@
 
 ## 本机 k3s 说明
 
-- 集群无法拉取公网镜像时，按上面步骤导入镜像。local-path provisioner 还需要 helper 镜像；若卷创建失败，改用 helper 镜像已存在的 StorageClass，或为一次性测试使用 hostPath。
+- 集群无法拉取公网镜像时，按上面步骤导入镜像。`local-path` provisioner 还会用 `rancher/mirrored-library-busybox:1.37.0` 创建 helper pod（见 `kube-system/local-path-config`），该镜像也要导入，否则 PVC 会停在 Pending 并记录 `trying and failing to pull image`。PVC 为 `WaitForFirstConsumer`，只有 Pod 挂载后才会绑定。
 - 若宿主机拦截 DNS（例如透明代理返回 `198.18.0.0/15` 的 fake IP），集群内 Service 名可能解析到代理地址；此时在 `AIOPS_AGENT_SERVER` 中使用 Service ClusterIP 或节点地址，并把该 authority 加入 `DSH_TRUSTED_HOSTS`。
-- 已在本机 k3s 验证：部署 server 镜像、通过部署后的 Portal API 签发令牌、以 Pod 运行 agent（使用已提交 RBAC 与 service-account 令牌）并探测、drain 后替换为 2.0.0、最后吊销。
+- 已在本机 k3s 验证：部署 server 镜像（先用 hostPath，导入 helper 镜像后改用清单中的真实 PVC）、通过部署后的 Portal API 签发令牌、以 Pod 运行 agent（使用已提交 RBAC 与 service-account 令牌）并探测、drain 后替换为 2.0.0、最后吊销。
