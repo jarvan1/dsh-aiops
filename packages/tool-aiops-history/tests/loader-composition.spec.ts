@@ -8,18 +8,14 @@ import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
-import { executeTestTool } from '../../../tests/helpers/tool-executor.ts'
-import SessionStore, { appendPluginRecord, SessionId, type Session } from '@deepseek-ai/dsh-session'
-// DSH 0.2.x: this plugin no longer has a default export; the Loader resolves it
-// from its named `name`/`apply` exports, so import the namespace.
-import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
-import SqliteSessionQuery from '@deepseek-ai/dsh-session-query-sqlite'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as JsonBackend from '@deepseek-ai/dsh-storage-json'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as Incident from '../../aiops-incident/src/index.ts'
 import * as HistoryTools from '../src/index.ts'
-import { installTestToolExecutor } from '../../../tests/helpers/tool-executor.ts'
+import { executeTestTool, installTestToolExecutor } from '../../../tests/helpers/tool-executor.ts'
 
 let root: string | undefined
 let context: Context | undefined
@@ -52,8 +48,8 @@ function incident(id: string, title: string): AiopsIncidentState {
   }
 }
 
-function fakeAgent(session: Session): Agent {
-  return { id: session.id, session } as unknown as Agent
+function agentOf(sessionId: string, cwd?: string): Agent {
+  return { session: { id: sessionId, ...(cwd === undefined ? {} : { header: { cwd } }) } } as unknown as Agent
 }
 
 function parseJson(value: string): unknown {
@@ -65,25 +61,21 @@ describe('AIOps incident history through a real Loader composition', () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-aiops-history-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-session'",
-      "- name: '@deepseek-ai/dsh-session-persistence-jsonl'",
+      "- name: '@deepseek-ai/dsh-storage-json'",
       '  config:',
-      `    root: ${JSON.stringify(join(root, 'sessions'))}`,
-      '    compression: none',
-      "- name: '@deepseek-ai/dsh-session-projection'",
+      `    root: ${JSON.stringify(join(root, 'storages'))}`,
+      "- name: '@deepseek-ai/dsh-storage-domain'",
+      '  config:',
+      '    backend: json',
       "- name: '@deepseek-ai/dsh-system-prompt'",
       "- name: '@deepseek-ai/dsh-tools'",
-      "- name: '@deepseek-ai/dsh-session-query-sqlite'",
-      '  config:',
-      "    path: ':memory:'",
-      '    openAt: startup',
       "- name: '@deepseek-ai/dsh-aiops-incident'",
       "- name: 'fake-aiops-router'",
       "- name: '@deepseek-ai/dsh-tool-aiops-history'",
       '  config:',
       '    defaultLimit: 2',
       '    maxLimit: 3',
-      '    maxScanSessions: 10',
+      '    maxScanRecords: 10',
       '    timeoutMs: 1000',
       '',
     ].join('\n'))
@@ -91,6 +83,9 @@ describe('AIOps incident history through a real Loader composition', () => {
     const ctx = new Context()
     context = ctx
     ctx.baseUrl = pathToFileURL(root).href + '/'
+    // The storage hub is a Service class without `apply`, so it mounts directly
+    // rather than through the Loader; its backends and consumers load via yml.
+    await ctx.plugin(Storage)
     await ctx.plugin(Loader)
     ctx.loader.builtins.include = Include
     const fakeRouter = {
@@ -115,12 +110,10 @@ describe('AIOps incident history through a real Loader composition', () => {
       },
     }
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-session', SessionStore],
-      ['@deepseek-ai/dsh-session-persistence-jsonl', JsonlSessionPersistence],
-      ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
+      ['@deepseek-ai/dsh-storage-json', JsonBackend],
+      ['@deepseek-ai/dsh-storage-domain', StorageDomain],
       ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
       ['@deepseek-ai/dsh-tools', ToolRuntime],
-      ['@deepseek-ai/dsh-session-query-sqlite', SqliteSessionQuery],
       ['@deepseek-ai/dsh-aiops-incident', Incident],
       ['fake-aiops-router', fakeRouter],
       ['@deepseek-ai/dsh-tool-aiops-history', HistoryTools],
@@ -136,40 +129,34 @@ describe('AIOps incident history through a real Loader composition', () => {
     await ctx.loader.await()
     installTestToolExecutor(ctx)
 
-    const caller = ctx.sessions.create(SessionId('caller'), { meta: { createdAt: 1, cwd: '/work' } })
-    appendPluginRecord(caller, 'plugin:aiops/incident-state', incident('inc-caller', 'Checkout'))
-    const prior = ctx.sessions.create(SessionId('prior'), { meta: { createdAt: 2, cwd: '/work' } })
-    prior.append('user/message', {
-      id: 'ordinary-message' as never,
-      role: 'user',
-      source: { kind: 'user' },
-      content: [{ type: 'text', text: 'not an incident' }],
-    }, { surfaceOp: 'append' })
-    appendPluginRecord(prior, 'plugin:aiops/incident-state', incident('inc-prior', 'Payments'))
-    appendPluginRecord(prior, 'plugin:aiops/operator-feedback', {
+    // Seed the plugin-owned store the way the reporting tools would.
+    const store = ctx.aiopsIncidents
+    await store.report('caller', '/work', incident('inc-caller', 'Checkout'))
+    await store.report('prior', '/work', incident('inc-prior', 'Payments'))
+    await store.appendFeedback('prior', Incident.decodeAiopsOperatorFeedback({
       version: 1,
-      feedbackId: `feedback-${'a'.repeat(32)}` as never,
-      incidentId: 'inc-prior' as never,
-      reportSeq: 1,
+      feedbackId: `feedback-${'a'.repeat(32)}`,
+      incidentId: 'inc-prior',
+      reportRevision: 1,
       verdict: 'confirmed',
       note: 'Payments diagnosis confirmed by the operator.',
       origin: 'operator-via-agent',
-    })
-    const hidden = ctx.sessions.create(SessionId('hidden'), { meta: { createdAt: 3, cwd: '/secret' } })
-    appendPluginRecord(hidden, 'plugin:aiops/incident-state', incident('inc-hidden', 'Secret'))
+    }))
+    await store.report('hidden', '/secret', incident('inc-hidden', 'Secret'))
 
-    const execute = (name: string, args: unknown, agent: Agent | null = fakeAgent(caller)) => executeTestTool(ctx, {
+    const caller = agentOf('caller', '/work')
+    const execute = (name: string, args: unknown, agent: Agent | null = caller) => executeTestTool(ctx, {
       name,
       arguments: args,
       ...(agent === null ? {} : { agent }),
     })
 
-    expect(ctx.tools.schemas().map(schema => schema.name)).toEqual([
-      'aiops_incident_report', 'aiops_incident_feedback', 'aiops_incident_list', 'aiops_incident_get',
-      'aiops_incident_search', 'aiops_feedback_list', 'aiops_routing_audit',
+    expect(ctx.tools.schemas().map(schema => schema.name).sort()).toEqual([
+      'aiops_feedback_list', 'aiops_incident_feedback', 'aiops_incident_get', 'aiops_incident_list',
+      'aiops_incident_report', 'aiops_incident_search', 'aiops_routing_audit',
     ])
     expect(ctx.tools.get('aiops_incident_list')?.presentCall?.({})).toMatchObject({ title: 'List AIOps incidents' })
-    expect(ctx.tools.get('aiops_incident_get')?.presentCall?.({ session_id: 'prior', seq: 1 }))
+    expect(ctx.tools.get('aiops_incident_get')?.presentCall?.({ session_id: 'prior', revision: 1 }))
       .toMatchObject({ title: 'Read AIOps incident' })
     expect(ctx.tools.get('aiops_incident_search')?.presentCall?.({ query: 'Payments' }))
       .toMatchObject({ title: 'Search AIOps incidents' })
@@ -181,8 +168,8 @@ describe('AIOps incident history through a real Loader composition', () => {
     expect(listed.isError).toBe(false)
     if (listed.isError) throw listed.error
     expect(parseJson(listed.value as string)).toMatchObject([
-      { sessionId: 'prior', incident: { incidentId: 'inc-prior' } },
-      { sessionId: 'caller', incident: { incidentId: 'inc-caller' } },
+      { sessionId: 'prior', revision: 1, incident: { incidentId: 'inc-prior' } },
+      { sessionId: 'caller', revision: 1, incident: { incidentId: 'inc-caller' } },
     ])
 
     const searched = await execute('aiops_incident_search', { query: 'Payments API saturation', limit: 1 })
@@ -206,80 +193,43 @@ describe('AIOps incident history through a real Loader composition', () => {
     expect(parseJson(routing.value as string)).toMatchObject([
       { deliveryId: 'delivery-1', outcome: 'grouped', reason: 'fingerprint-grouped' },
     ])
-    expect((await execute('aiops_routing_audit', {}, fakeAgent(hidden))).isError).toBe(true)
+    expect((await execute('aiops_routing_audit', {}, agentOf('hidden', '/secret'))).isError).toBe(true)
 
-    const read = await execute('aiops_incident_get', { session_id: 'prior', seq: 1 })
+    const read = await execute('aiops_incident_get', { session_id: 'prior', revision: 1 })
     expect(read.isError).toBe(false)
     if (read.isError) throw read.error
     expect(parseJson(read.value as string)).toMatchObject({ incident: { incidentId: 'inc-prior' } })
-    expect((await execute('aiops_incident_get', { session_id: 'caller', seq: 0 })).isError).toBe(false)
+    expect((await execute('aiops_incident_get', { session_id: 'caller', revision: 1 })).isError).toBe(false)
 
-    expect((await execute('aiops_incident_get', { session_id: 'hidden', seq: 0 })).isError).toBe(true)
-    expect((await execute('aiops_incident_get', { session_id: 'prior', seq: 0 })).isError).toBe(true)
-    expect((await execute('aiops_incident_get', { session_id: 'prior', seq: -1 })).isError).toBe(true)
+    expect((await execute('aiops_incident_get', { session_id: 'hidden', revision: 1 })).isError).toBe(true)
+    expect((await execute('aiops_incident_get', { session_id: 'prior', revision: 2 })).isError).toBe(true)
+    expect((await execute('aiops_incident_get', { session_id: 'prior', revision: -1 })).isError).toBe(true)
     expect((await execute('aiops_incident_list', { limit: 4 })).isError).toBe(true)
     expect((await execute('aiops_incident_list', {}, null)).isError).toBe(true)
 
-    const originalReadEvent = ctx.sessionQuery.readEvent.bind(ctx.sessionQuery)
-    ctx.sessionQuery.readEvent = async (request, signal) => {
-      const window = await originalReadEvent(request, signal)
-      return { ...window, session: { ...window.session, cwd: '/secret' } }
-    }
-    expect((await execute('aiops_incident_get', { session_id: 'prior', seq: 1 })).isError).toBe(true)
-    ctx.sessionQuery.readEvent = originalReadEvent
-
-    appendPluginRecord(caller, 'plugin:aiops/incident-state', incident('inc-caller', 'Checkout update'))
-    const originalFilterSessions = ctx.sessionQuery.filterSessions.bind(ctx.sessionQuery)
-    const originalListEvents = ctx.sessionQuery.listEvents.bind(ctx.sessionQuery)
-    ctx.sessionQuery.filterSessions = () => Promise.resolve([
-      { header: caller.header, live: true, persisted: false },
-      { header: prior.header, live: true, persisted: false },
-    ])
-    ctx.sessionQuery.listEvents = sessionId => Promise.resolve(sessionId === caller.id
-      ? [
-        { sessionId: caller.id, seq: 0 as never, time: 5, type: 'plugin:aiops/incident-state', surface: 'log-only' },
-        { sessionId: caller.id, seq: 1 as never, time: 5, type: 'plugin:aiops/incident-state', surface: 'log-only' },
-      ]
-      : [{ sessionId: prior.id, seq: 1 as never, time: 5, type: 'plugin:aiops/incident-state', surface: 'log-only' }])
-    const tied = await execute('aiops_incident_list', { limit: 3 })
-    expect(tied.isError).toBe(false)
-    if (tied.isError) throw tied.error
-    const tiedRecords = parseJson(tied.value as string) as Array<{ sessionId: string; seq: number }>
-    expect(tiedRecords.map(item => [item.sessionId, item.seq]))
-      .toEqual([['prior', 1], ['caller', 1], ['caller', 0]])
-    ctx.sessionQuery.filterSessions = originalFilterSessions
-    ctx.sessionQuery.listEvents = originalListEvents
-
-    const isolated = ctx.sessions.create(SessionId('isolated'), { meta: { createdAt: 4 } })
-    appendPluginRecord(isolated, 'plugin:aiops/incident-state', incident('inc-isolated', 'Isolated'))
-    const isolatedList = await execute('aiops_incident_list', {}, fakeAgent(isolated))
+    // A cwd-less caller sees only its own Session's record.
+    await store.report('isolated', '/elsewhere', incident('inc-isolated', 'Isolated'))
+    const isolatedAgent = agentOf('isolated')
+    const isolatedList = await execute('aiops_incident_list', {}, isolatedAgent)
     expect(isolatedList.isError).toBe(false)
     if (isolatedList.isError) throw isolatedList.error
     expect(JSON.parse(isolatedList.value as string)).toHaveLength(1)
-    expect((await execute('aiops_incident_get', { session_id: 'isolated', seq: 0 }, fakeAgent(isolated))).isError)
+    expect((await execute('aiops_incident_get', { session_id: 'isolated', revision: 1 }, isolatedAgent)).isError)
       .toBe(false)
-    expect((await execute('aiops_incident_get', { session_id: 'caller', seq: 0 }, fakeAgent(isolated))).isError)
+    expect((await execute('aiops_incident_get', { session_id: 'caller', revision: 1 }, isolatedAgent)).isError)
       .toBe(true)
 
     const entry = [...ctx.loader.entries()].find(candidate =>
       candidate.options.name === '@deepseek-ai/dsh-tool-aiops-history')
     if (entry?.fiber === undefined) throw new Error('missing AIOps history Loader fiber')
     await entry.fiber.dispose()
-    expect(ctx.tools.schemas().map(schema => schema.name)).toEqual(['aiops_incident_report', 'aiops_incident_feedback'])
+    expect(ctx.tools.schemas().map(schema => schema.name).sort())
+      .toEqual(['aiops_incident_feedback', 'aiops_incident_report'])
 
     const incidentEntry = [...ctx.loader.entries()].find(candidate =>
       candidate.options.name === '@deepseek-ai/dsh-aiops-incident')
     if (incidentEntry?.fiber === undefined) throw new Error('missing AIOps incident Loader fiber')
-    const queryWithExtractors = ctx.sessionQuery as typeof ctx.sessionQuery & {
-      extractEventText?: (event: ReturnType<typeof caller.snapshotEvents>[number]) => string
-    }
-    if (queryWithExtractors.extractEventText !== undefined) {
-      expect(queryWithExtractors.extractEventText(caller.snapshotEvents()[0]!)).toContain('Checkout')
-    }
     await incidentEntry.fiber.dispose()
-    if (queryWithExtractors.extractEventText !== undefined) {
-      expect(queryWithExtractors.extractEventText(caller.snapshotEvents()[0]!)).toBe('')
-    }
     expect(ctx.tools.schemas()).toEqual([])
   }, 30_000)
 })

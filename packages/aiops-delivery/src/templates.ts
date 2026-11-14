@@ -7,8 +7,8 @@ import type { AiopsDeliveryProvider } from './types.ts'
 export interface DeliveryMeta {
   /** Owning diagnostic Session id. */
   readonly sessionId: string
-  /** Sequence of the incident-state event being pushed. */
-  readonly reportSeq: number
+  /** Revision of the incident report being pushed. */
+  readonly reportRevision: number
   /** Configured Portal base URL for the deep link; absent when unset. */
   readonly portalUrl?: string
 }
@@ -59,7 +59,7 @@ function facts(
     { label: 'Severity', value: incident.severity },
     { label: 'Status', value: incident.status },
     { label: 'Incident', value: incident.incidentId },
-    { label: 'Session', value: `${meta.sessionId} · report #${meta.reportSeq}` },
+    { label: 'Session', value: `${meta.sessionId} · report r${meta.reportRevision}` },
     { label: 'Evidence', value: `${incident.evidence.length} item(s)` },
     { label: 'Hypotheses', value: `${incident.hypotheses.length}` },
     { label: 'Recommendations', value: `${incident.recommendations.length}` },

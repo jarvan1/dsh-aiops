@@ -2,7 +2,9 @@
 
 [English](2026-09-06-operator-feedback-storm-control.md) | 中文
 
-状态：接受
+状态：接受（存储机制于 2026-11-14 修订）
+
+> **2026-11-14 修订：** verdict 现在写入 `aiops_incident` 反馈表的仅追加行，并引用所审的 `reportRevision`；verdict 规则与风暴控制不变。见[把 AIOps 事件状态迁入插件自有存储域](2026-11-14-aiops-plugin-owned-incident-store.zh.md)。
 
 ## 决策
 

@@ -1,92 +1,35 @@
 /**
- * Durable structured AIOps incident state, projection, and reporting tool.
+ * Durable structured AIOps incident state, store service, and reporting tool.
  * @module @deepseek-ai/dsh-aiops-incident
  */
 
 import type { Context } from '@deepseek-ai/cordis'
 import { createHash } from 'node:crypto'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { appendPluginRecord, pluginRecordOf } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-session-persistence'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-session-query'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
-  aiopsIncidentProjectionSchema,
   decodeAiopsIncidentState,
-  validateAiopsIncidentTransition,
 } from './domain.ts'
-import type { AiopsIncidentState } from './types.ts'
-import { aiopsFeedbackProjectionSchema, decodeAiopsOperatorFeedback } from './feedback.ts'
-import type { AiopsFeedbackId, AiopsOperatorFeedback } from './types.ts'
+import { decodeAiopsOperatorFeedback } from './feedback.ts'
+import { AiopsIncidentStore } from './store.ts'
+import type { AiopsFeedbackId, AiopsIncidentState, AiopsOperatorFeedback } from './types.ts'
 
 export type * from './types.ts'
 export {
   MAX_COLLECTION_ITEMS,
-  aiopsIncidentProjectionSchema,
   decodeAiopsIncidentState,
+  incidentStateSchema,
   validateAiopsIncidentTransition,
 } from './domain.ts'
-export { aiopsFeedbackProjectionSchema, decodeAiopsOperatorFeedback } from './feedback.ts'
+export { decodeAiopsOperatorFeedback, operatorFeedbackValueSchema } from './feedback.ts'
+export { AiopsIncidentStore, aiopsIncidentDomainSpec } from './store.ts'
+export type { AiopsIncidentStoreApi } from './store.ts'
 
 /** Cordis plugin name used by Loader diagnostics. */
 export const name = 'aiops-incident'
 
-/** Registries and durability services required by the incident workflow. */
-export const inject = ['tools', 'sessions', 'sessionPersistence', 'sessionProjections']
-
-interface EventTextExtractorRegistrar {
-  registerEventTextExtractor?: (definition: {
-    eventType: string
-    revision: string
-    extract: (event: { data: unknown }) => string
-  }) => () => void
-}
-
-/**
- * AIOps incident records are plugin records: ignorable by contract, so an
- * unknown reader retains and skips them instead of refusing the whole log.
- */
-type AiopsRecordType = 'plugin:aiops/incident-state' | 'plugin:aiops/operator-feedback'
-
-function appendIncidentRecord(
-  session: Parameters<Context['sessions']['flush']>[0],
-  type: AiopsRecordType,
-  data: AiopsIncidentState | AiopsOperatorFeedback,
-): void {
-  appendPluginRecord(session, type, data)
-}
-
-/** Latest-whole-value incident projection. */
-export const aiopsIncidentProjectionDefinition = {
-  key: 'aiopsIncident',
-  stateSchema: aiopsIncidentProjectionSchema,
-  init: () => null,
-  apply: (state, event) => {
-    const record = pluginRecordOf(event)
-    return record !== undefined && record.type === 'plugin:aiops/incident-state'
-      ? decodeAiopsIncidentState(record.data)
-      : state
-  },
-  wire: { viewSchema: aiopsIncidentProjectionSchema, view: state => state },
-  stateVersion: 1,
-} satisfies ProjectionDefinition<'aiopsIncident', AiopsIncidentState | null>
-
-/** Latest append-only operator review in the current incident Session. */
-export const aiopsFeedbackProjectionDefinition = {
-  key: 'aiopsIncidentFeedback',
-  stateSchema: aiopsFeedbackProjectionSchema,
-  init: () => null,
-  apply: (state, event) => {
-    const record = pluginRecordOf(event)
-    return record !== undefined && record.type === 'plugin:aiops/operator-feedback'
-      ? decodeAiopsOperatorFeedback(record.data)
-      : state
-  },
-  wire: { viewSchema: aiopsFeedbackProjectionSchema, view: state => state },
-  stateVersion: 1,
-} satisfies ProjectionDefinition<'aiopsIncidentFeedback', AiopsOperatorFeedback | null>
+/** Services required before the reporting tools are registered. */
+export const inject = ['tools']
 
 const EVIDENCE_SCHEMA = {
   type: 'object',
@@ -139,7 +82,7 @@ const FEEDBACK_SCHEMA = {
     version: { type: 'integer', required: true, const: 1 },
     feedbackId: { type: 'string', required: true },
     incidentId: { type: 'string', required: true },
-    reportSeq: { type: 'integer', required: true },
+    reportRevision: { type: 'integer', required: true },
     verdict: { type: 'string', required: true, enum: ['confirmed', 'corrected', 'rejected'] },
     note: { type: 'string', required: true },
     correction: { type: 'string' },
@@ -147,35 +90,20 @@ const FEEDBACK_SCHEMA = {
   },
 } as const
 
-async function requireFlush(ctx: Context, session: Parameters<Context['sessions']['flush']>[0]): Promise<void> {
-  if (!await ctx.sessions.flush(session)) throw new Error('AIOps incident persistence is uncertain; inspect the session before retrying.')
+/** Register the incident store service and the reporting tools. */
+export async function apply(ctx: Context): Promise<void> {
+  // This package owns the store service: mount it first, then register the
+  // tools on a scoped fiber that may touch `ctx.aiopsIncidents`.
+  await ctx.plugin(AiopsIncidentStore)
+  ctx.inject(['aiopsIncidents'], toolCtx => {
+    registerTools(toolCtx)
+  })
 }
 
-/** Register the incident projection and complete-state reporting tool. */
-export async function apply(ctx: Context): Promise<void> {
-  const incidentProjection = await ctx.sessionProjections.register(aiopsIncidentProjectionDefinition)
-  // Consumed through the shared wire snapshot and session query, not a handle read.
-  await ctx.sessionProjections.register(aiopsFeedbackProjectionDefinition)
-  ctx.inject(['sessionQuery'], (queryCtx) => {
-    queryCtx.effect(() => {
-      const registrar = queryCtx.sessionQuery as typeof queryCtx.sessionQuery & EventTextExtractorRegistrar
-      if (registrar.registerEventTextExtractor === undefined) return () => {}
-      const disposeIncident = registrar.registerEventTextExtractor({
-        eventType: 'plugin:aiops/incident-state',
-        revision: '1',
-        extract: event => incidentSearchText(decodeAiopsIncidentState(event.data)),
-      })
-      const disposeFeedback = registrar.registerEventTextExtractor({
-        eventType: 'plugin:aiops/operator-feedback',
-        revision: '1',
-        extract: event => feedbackSearchText(decodeAiopsOperatorFeedback(event.data)),
-      })
-      return () => { disposeFeedback(); disposeIncident() }
-    }, 'aiopsIncident.sessionQueryText')
-  })
+function registerTools(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'aiops_incident_report',
-    description: 'Persist the COMPLETE current incident report after collecting evidence. Every call replaces the prior report. Keep the incident id stable, cite evidence ids from this report in each hypothesis, distinguish facts from hypotheses, and propose actions for human review only. This tool records state and never changes infrastructure.',
+    description: 'Persist the COMPLETE current incident report after collecting evidence. Every call replaces the prior report and bumps its revision. Keep the incident id stable, cite evidence ids from this report in each hypothesis, distinguish facts from hypotheses, and propose actions for human review only. The first report cannot use status "resolved"; closure is appended after alert recovery. This tool records state and never changes infrastructure.',
     parameters: {
       incident: { ...INCIDENT_SCHEMA, required: true, description: 'Complete current incident state.' },
     },
@@ -183,14 +111,10 @@ export async function apply(ctx: Context): Promise<void> {
     async execute(args, exec) {
       const agent = exec.agent
       if (agent === undefined) throw new Error('aiops_incident_report requires an owning agent session.')
-      await requireFlush(ctx, agent.session)
       exec.signal.throwIfAborted()
       const next = decodeAiopsIncidentState(args.incident)
-      const previous = incidentProjection.stateOf(agent.session)
-      validateAiopsIncidentTransition(previous, next)
-      appendIncidentRecord(agent.session, 'plugin:aiops/incident-state', next)
-      await requireFlush(ctx, agent.session)
-      return next
+      const workspace = workspaceOfSession(agent.session)
+      return (await ctx.aiopsIncidents.report(String(agent.session.id), workspace, next)).incident
     },
     presentCall: args => ({ card: 'generic', title: 'Record AIOps incident', kind: 'other', rawInput: args.incident }),
   }))
@@ -207,41 +131,35 @@ export async function apply(ctx: Context): Promise<void> {
     async execute(args, exec) {
       const agent = exec.agent
       if (agent === undefined) throw new Error('aiops_incident_feedback requires an owning agent session.')
-      await requireFlush(ctx, agent.session)
       exec.signal.throwIfAborted()
-      const records = agent.session.ownEvents().flatMap(event => {
-        const record = pluginRecordOf(event)
-        return record === undefined ? [] : [record]
-      })
-      const reportRecord = records.findLast(record => record.type === 'plugin:aiops/incident-state')
-      if (reportRecord === undefined) {
+      const sessionId = String(agent.session.id)
+      const record = ctx.aiopsIncidents.get(sessionId)
+      if (record === undefined) {
         throw new Error('aiops_incident_feedback requires a persisted incident report in this Session.')
       }
-      // Stored records carry whatever JSON their writer committed; the owner
-      // validates before use, so an older or newer writer cannot corrupt us.
-      const report = decodeAiopsIncidentState(reportRecord.data)
       const feedbackId = brandString<AiopsFeedbackId>(`feedback-${createHash('sha256')
-        .update(`${agent.session.id}\0${exec.callId}`)
+        .update(`${sessionId}\0${exec.callId}`)
         .digest('hex').slice(0, 32)}`)
-      const replay = records.find(record => record.type === 'plugin:aiops/operator-feedback'
-        && (record.data as AiopsOperatorFeedback).feedbackId === feedbackId)
-      if (replay !== undefined) return decodeAiopsOperatorFeedback(replay.data)
       const feedback = decodeAiopsOperatorFeedback({
         version: 1,
         feedbackId,
-        incidentId: report.incidentId,
-        reportSeq: reportRecord.seq,
+        incidentId: record.incident.incidentId,
+        reportRevision: record.revision,
         verdict: args.verdict,
         note: args.note,
         ...(args.correction === undefined ? {} : { correction: args.correction }),
         origin: 'operator-via-agent',
       })
-      appendIncidentRecord(agent.session, 'plugin:aiops/operator-feedback', feedback)
-      await requireFlush(ctx, agent.session)
-      return feedback
+      return (await ctx.aiopsIncidents.appendFeedback(sessionId, feedback)).feedback
     },
     presentCall: args => ({ card: 'generic', title: 'Record AIOps operator feedback', kind: 'other', rawInput: args }),
   }))
+}
+
+/** The diagnostic Session's workspace (cwd), falling back to the process cwd. */
+function workspaceOfSession(session: object): string {
+  const header = (session as { header?: { cwd?: string } }).header
+  return header?.cwd ?? process.cwd()
 }
 
 export function incidentSearchText(incident: AiopsIncidentState): string {

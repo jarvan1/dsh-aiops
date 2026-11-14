@@ -65,11 +65,10 @@ export type ConnectionTestResult =
 
 export interface PortalIncident {
   readonly sessionId: string
-  readonly reportSeq: number
-  readonly reportTime: number
+  readonly revision: number
+  readonly updatedAt: number
   readonly incident: AiopsIncidentState
   readonly feedback?: {
-    readonly seq: number
     readonly time: number
     readonly feedback: AiopsOperatorFeedback
   }
@@ -88,7 +87,7 @@ export interface PortalSummary {
 }
 
 export interface PortalSnapshot {
-  readonly version: 2
+  readonly version: 3
   readonly workspace: string
   readonly generatedAt: number
   readonly summary: PortalSummary

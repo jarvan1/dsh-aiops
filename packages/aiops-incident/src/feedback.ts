@@ -28,7 +28,7 @@ const rawFeedbackSchema = z.object({
   version: z.literal(1),
   feedbackId: feedbackIdSchema,
   incidentId: incidentIdSchema,
-  reportSeq: z.number().int().nonnegative().safe(),
+  reportRevision: z.number().int().positive().safe(),
   verdict: z.enum(['confirmed', 'corrected', 'rejected']),
   note: boundedText('feedback note'),
   correction: boundedText('feedback correction').optional(),
@@ -46,27 +46,17 @@ const feedbackSchema: ZodType<AiopsOperatorFeedback> = rawFeedbackSchema.transfo
   version: feedback.version,
   feedbackId: feedback.feedbackId,
   incidentId: feedback.incidentId,
-  reportSeq: feedback.reportSeq,
+  reportRevision: feedback.reportRevision,
   verdict: feedback.verdict,
   note: feedback.note,
   ...(feedback.correction === undefined ? {} : { correction: feedback.correction }),
   origin: feedback.origin,
 }))
 
-/** Decode untrusted model input, durable events, and projection cache values. */
+/** Zod validator for one whole feedback value; shared with the storage-domain record schema. */
+export { feedbackSchema as operatorFeedbackValueSchema }
+
+/** Decode untrusted model input and durable-store values. */
 export function decodeAiopsOperatorFeedback(value: unknown): AiopsOperatorFeedback {
   return feedbackSchema.parse(value)
 }
-
-/** Projection-cache validator for the latest feedback value. */
-export const aiopsFeedbackProjectionSchema: ZodType<AiopsOperatorFeedback | null> = z.union([
-  z.unknown().transform((value, context): AiopsOperatorFeedback => {
-    try {
-      return decodeAiopsOperatorFeedback(value)
-    } catch {
-      context.addIssue({ code: 'custom', message: 'invalid AIOps operator feedback' })
-      return z.NEVER
-    }
-  }),
-  z.null(),
-])

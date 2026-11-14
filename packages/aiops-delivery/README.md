@@ -1,13 +1,20 @@
+---
+description: "Push completed AIOps diagnoses to an IM incoming webhook."
+kind: "package-reference"
+---
+
 # @deepseek-ai/dsh-aiops-delivery
+
+English | [中文](README.zh.md)
 
 Push completed AIOps diagnoses to an IM incoming webhook so on-call operators see the diagnosis without opening the Portal.
 
 ## How it works
 
-- Subscribes to the `aiopsIncident` projection change feed from `@deepseek-ai/dsh-aiops-incident`.
+- Subscribes to the `aiopsIncidents/changed` event from the plugin-owned incident store.
 - On each committed incident report, renders one message for the configured provider and POSTs it to the IM webhook with a bounded body, deadline, and response cap.
-- Records one append-only `plugin:aiops/delivery` marker (`delivered` or `failed`) in the diagnostic Session, so restarts and replays never double-push, and later severity escalation can retry after a failed burst.
-- Never mutates infrastructure: the push is informational and the Session log stays the diagnostic truth.
+- Persists one terminal decision (`delivered` or `failed` with a bounded reason) per Session in the `aiops_delivery` storage domain, so restarts and replays never double-push, and later severity escalation can retry after a failed burst.
+- Never mutates infrastructure: the push is informational and the Session log stays the diagnostic narrative.
 
 ## Providers
 

@@ -54,7 +54,7 @@ This release intentionally has no Portal reveal or credential-write endpoint, so
 
 `aiops-delivery` pushes completed diagnoses to one IM incoming webhook (Feishu, DingTalk, or Slack). Store the https webhook URL as the `AIOPS_DELIVERY_WEBHOOK_URL` credential-reference value in `<DSH_HOME>/.credentials.yaml` with mode `0600` or in an external secret manager — never in the patch, the settings store, or the repository. The provider (`provider`), severity gate (`minSeverity`), Portal deep link (`portalBaseUrl`), and bounded deadline/retry limits are entry settings that the Web settings UI projects; committing an edit reloads the entry. The credential value is re-resolved for every delivery, so rotating the IM webhook token needs no restart: update the reference value and send one canary incident.
 
-To verify, route one canary alert and confirm the message lands in the target IM thread and a `plugin:aiops/delivery` record with outcome `delivered` appears in the Session log.
+To verify, route one canary alert and confirm the message lands in the target IM thread and the `aiops_delivery` domain holds a marker for that Session with outcome `delivered` (`<DSH_HOME>/storages/aiops_delivery/markers/<session-id>.json`).
 
 ## Local development run
 
@@ -89,7 +89,7 @@ curl -s -X POST http://127.0.0.1:3081/alertmanager \
   -d '{"version":"4","alerts":[{"status":"firing","startsAt":"2026-11-08T10:00:00Z","labels":{"alertname":"HighLatency","severity":"critical","service":"checkout"},"annotations":{"description":"p99 latency above 4s"}}]}'
 ```
 
-The canary exercises the full loop: authenticated ingress → router round → deterministic diagnostic Session (the model must be configured in the profile) → `aiops_incident_report` → delivery push → IM thread message plus a `plugin:aiops/delivery` `delivered` record. Diagnosis quality depends on Prometheus/Alertmanager/Kubernetes connectivity, but the delivery smoke test only needs the model to produce an incident report. Switch providers by editing `provider` in settings; rotate the IM webhook token by updating the credential value — delivery re-resolves it per attempt without a restart.
+The canary exercises the full loop: authenticated ingress → router round → deterministic diagnostic Session (the model must be configured in the profile) → `aiops_incident_report` → the `aiops_incident` storage domain → delivery push → IM thread message plus an `aiops_delivery` `delivered` marker. Diagnosis quality depends on Prometheus/Alertmanager/Kubernetes connectivity, but the delivery smoke test only needs the model to produce an incident report. Switch providers by editing `provider` in settings; rotate the IM webhook token by updating the credential value — delivery re-resolves it per attempt without a restart.
 
 ## Container image
 
@@ -108,7 +108,7 @@ Credentials injected with `-e` are resolved by the ambient credential fallbacks 
 
 ## Upgrade and configuration migration
 
-Back up the DSH settings document, Session workspace, `aiops-router.sqlite`, and credential file before upgrading. The router schema accepts the pre-F.2 `alertnameAllowlist` field so an old profile still starts, logs a deprecation warning, and adopts safe general-routing defaults: ignore `Watchdog` and `InfoInhibitor`, and map missing/unknown severity to `warning`. Replace the old field with explicit `routingPolicy` immediately; the old allowlist is not interpreted as an exclusion list.
+Back up the DSH settings document, Session workspace, `<DSH_HOME>/storages/` (the `aiops_incident` and `aiops_delivery` domains), `aiops-router.sqlite`, and the credential file before upgrading. The storage domains are plain JSON under `storages/<domain>/<table>/<key>.json`; copy the whole `storages/` directory while DSH is stopped, and restore it with matching ownership and mode `0600`/`0700`. A record that no longer matches the current schema is moved aside and skipped at startup rather than blocking the boot, so keep the pre-upgrade copy as the recovery point. The router schema accepts the pre-F.2 `alertnameAllowlist` field so an old profile still starts, logs a deprecation warning, and adopts safe general-routing defaults: ignore `Watchdog` and `InfoInhibitor`, and map missing/unknown severity to `warning`. Replace the old field with explicit `routingPolicy` immediately; the old allowlist is not interpreted as an exclusion list.
 
 Routing settings are stored as `aiops-routing` version 1. Portal writes are revision-fenced, atomically update the complete policy, require a successful dry-run, and are recorded in `routing_policy_audit`. Invalid cross-field concurrency or token budgets are rejected before persistence.
 
@@ -125,6 +125,6 @@ node scripts/check-links.mjs
 pnpm --filter @deepseek-ai/dsh-aiops pack
 ```
 
-Install the resulting bundle into a disposable DSH profile first, inspect `config dump`, start it with disposable credentials, verify health/readiness/metrics and a canary webhook, then remove it. For an upgrade, repeat with a copy of the old profile and confirm Session history, routing queue recovery, settings, and Portal access before production rollout. Uninstall removes plugin registration but does not silently delete DSH home, Session JSONL, SQLite, settings, or credentials; archive or delete those explicitly under the deployment's retention policy.
+Install the resulting bundle into a disposable DSH profile first, inspect `config dump`, start it with disposable credentials, verify health/readiness/metrics and a canary webhook, then remove it. For an upgrade, repeat with a copy of the old profile and confirm the incident store (`aiops_incident`), delivery markers (`aiops_delivery`), Session history, routing queue recovery, settings, and Portal access before production rollout. Uninstall removes plugin registration but does not silently delete DSH home, storage domains, Session JSONL, SQLite, settings, or credentials; archive or delete those explicitly under the deployment's retention policy.
 
 Supported runtime versions are Node `^22.19.0 || >=24.0.0`, pnpm `11.7.0`, Cordis `^4.1.0`, and DSH `0.2.2-rc.1` package APIs. Treat a DSH package-version change as an upgrade requiring the same disposable-profile matrix.

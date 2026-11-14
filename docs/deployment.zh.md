@@ -30,7 +30,7 @@ Portal 永不返回 webhook bearer 明文，只返回公开 receiver URL 和“�
 
 `aiops-delivery` 把完成的诊断推送到一个 IM incoming webhook（飞书、钉钉或 Slack）。https webhook URL 作为 `AIOPS_DELIVERY_WEBHOOK_URL` credential reference 的值，保存在权限为 `0600` 的 `<DSH_HOME>/.credentials.yaml` 或外部 secret manager，不能进入 patch、设置存储或仓库。Provider（`provider`）、严重级别闸门（`minSeverity`）、Portal 深链（`portalBaseUrl`）以及有界的超时/重试上限都是 entry 设置，由 Web 设置界面投影；提交编辑会重载该 entry。凭证值在每次投递时重新解析，因此轮换 IM webhook token 无需重启：更新引用值并发送一次 canary 事件即可。
 
-验证方式：路由一次 canary 告警，确认消息出现在目标 IM 会话，且 Session 日志中出现一条 outcome 为 `delivered` 的 `plugin:aiops/delivery` 记录。
+验证方式：路由一次 canary 告警，确认消息出现在目标 IM 会话，且 `aiops_delivery` 域中该 Session 存在 outcome 为 `delivered` 的标记（`<DSH_HOME>/storages/aiops_delivery/markers/<session-id>.json`）。
 
 ## 本地开发运行
 
@@ -65,7 +65,7 @@ curl -s -X POST http://127.0.0.1:3081/alertmanager \
   -d '{"version":"4","alerts":[{"status":"firing","startsAt":"2026-11-08T10:00:00Z","labels":{"alertname":"HighLatency","severity":"critical","service":"checkout"},"annotations":{"description":"p99 latency above 4s"}}]}'
 ```
 
-canary 会走完整链路：认证 ingress → 路由轮次 → 确定性诊断 Session（profile 内需已配置模型）→ `aiops_incident_report` → 推送 → IM 会话消息加一条 `plugin:aiops/delivery` `delivered` 记录。诊断质量依赖 Prometheus/Alertmanager/Kubernetes 连通性，但 delivery 冒烟只需要模型产出事件报告。切换 provider 直接在设置中改 `provider`；轮换 IM webhook token 只需更新凭证值——投递每次尝试都重新解析，无需重启。
+canary 会走完整链路：认证 ingress → 路由轮次 → 确定性诊断 Session（profile 内需已配置模型）→ `aiops_incident_report` → `aiops_incident` 存储域 → 推送 → IM 会话消息加一条 `aiops_delivery` `delivered` 标记。诊断质量依赖 Prometheus/Alertmanager/Kubernetes 连通性，但 delivery 冒烟只需要模型产出事件报告。切换 provider 直接在设置中改 `provider`；轮换 IM webhook token 只需更新凭证值——投递每次尝试都重新解析，无需重启。
 
 ## 容器镜像
 
@@ -84,7 +84,7 @@ curl -s http://127.0.0.1:8080/api/aiops/healthz
 
 ## 升级与配置迁移
 
-升级前备份 DSH settings 文档、Session workspace、`aiops-router.sqlite` 与凭据文件。Router schema 会接受 F.2 之前的 `alertnameAllowlist`，使旧 profile 能启动并输出弃用警告，同时采用安全的通用默认值：忽略 `Watchdog` 和 `InfoInhibitor`，缺失/未知 severity 映射为 `warning`。启动后应立即把旧字段替换为显式 `routingPolicy`；旧 allowlist 不会被错误解释为排除列表。
+升级前备份 DSH settings 文档、Session workspace、`<DSH_HOME>/storages/`（`aiops_incident` 与 `aiops_delivery` 域）、`aiops-router.sqlite` 与凭据文件。存储域就是 `storages/<domain>/<table>/<key>.json` 下的普通 JSON；在 DSH 停止时整体复制 `storages/` 目录，恢复时保持属主一致与 `0600`/`0700` 权限。启动时不再匹配当前 schema 的记录会被移走并跳过，而不会阻塞启动，因此务必保留升级前的副本作为恢复点。Router schema 会接受 F.2 之前的 `alertnameAllowlist`，使旧 profile 能启动并输出弃用警告，同时采用安全的通用默认值：忽略 `Watchdog` 和 `InfoInhibitor`，缺失/未知 severity 映射为 `warning`。启动后应立即把旧字段替换为显式 `routingPolicy`；旧 allowlist 不会被错误解释为排除列表。
 
 路由设置以 `aiops-routing` version 1 保存。Portal 写入带 revision fence，原子提交完整策略，保存前要求 dry-run，并记录到 `routing_policy_audit`。非法的并发或 Token 预算关系会在持久化前拒绝。
 
@@ -101,6 +101,6 @@ node scripts/check-links.mjs
 pnpm --filter @deepseek-ai/dsh-aiops pack
 ```
 
-先在一次性 DSH profile 安装 bundle、检查 `config dump`、用一次性凭据启动、验证健康/就绪/指标和 canary webhook，再执行卸载。升级时使用旧 profile 副本重复验证 Session 历史、队列恢复、设置和 Portal。卸载只移除插件注册，不会静默删除 DSH home、Session JSONL、SQLite、settings 或凭据；这些数据必须按部署保留策略显式归档或删除。
+先在一次性 DSH profile 安装 bundle、检查 `config dump`、用一次性凭据启动、验证健康/就绪/指标和 canary webhook，再执行卸载。升级时使用旧 profile 副本重复验证事件存储（`aiops_incident`）、推送标记（`aiops_delivery`）、Session 历史、队列恢复、设置和 Portal。卸载只移除插件注册，不会静默删除 DSH home、存储域、Session JSONL、SQLite、settings 或凭据；这些数据必须按部署保留策略显式归档或删除。
 
 支持的运行时为 Node `^22.19.0 || >=24.0.0`、pnpm `11.7.0`、Cordis `^4.1.0` 和 DSH `0.2.2-rc.1` 包 API。DSH 包版本变化必须重新执行一次性 profile 升级矩阵。

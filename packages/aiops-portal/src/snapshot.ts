@@ -1,20 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis'
-import {
-  decodeAiopsIncidentState,
-  decodeAiopsOperatorFeedback,
-} from '@deepseek-ai/dsh-aiops-incident'
+import type { AiopsOperatorFeedback } from '@deepseek-ai/dsh-aiops-incident'
 import type { RouteAuditOutcome, RouteAuditRecord } from '@deepseek-ai/dsh-aiops-incident-router'
-import { pluginRecordOf } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-session-query'
 import type { PortalIncident, PortalSnapshot, PortalSummary } from './types.ts'
 
 export interface PortalLimits {
   readonly maxIncidents: number
   readonly maxAuditRecords: number
-  readonly maxScanSessions: number
+  readonly maxScanIncidents: number
 }
 
-type PortalContext = Pick<Context, 'sessionQuery' | 'aiopsIncidentRouter'>
+type PortalContext = Pick<Context, 'aiopsIncidents' | 'aiopsIncidentRouter'>
 
 export function summarizePortal(incidents: readonly PortalIncident[], audit: readonly RouteAuditRecord[]): PortalSummary {
   const auditCounts: Partial<Record<RouteAuditOutcome, number>> = {}
@@ -32,13 +27,8 @@ export function summarizePortal(incidents: readonly PortalIncident[], audit: rea
 }
 
 /** Build one bounded, workspace-owned read model without creating a second data store. */
-export async function readPortalSnapshot(
-  ctx: PortalContext,
-  limits: PortalLimits,
-  signal?: AbortSignal,
-): Promise<PortalSnapshot> {
+export function readPortalSnapshot(ctx: PortalContext, limits: PortalLimits): PortalSnapshot {
   const workspace = ctx.aiopsIncidentRouter.workspacePath
-  const sessions = await ctx.sessionQuery.filterSessions([{ kind: 'cwd', values: [workspace] }], signal)
   const audit = ctx.aiopsIncidentRouter.listControlAudit({ limit: limits.maxAuditRecords })
   const routingSettings = ctx.aiopsIncidentRouter.routingSettings()
   const routingPolicyAudit = ctx.aiopsIncidentRouter.listPolicyAudit({ limit: limits.maxAuditRecords })
@@ -49,53 +39,36 @@ export async function readPortalSnapshot(
     }
   }
 
-  const incidents: PortalIncident[] = []
-  // DSH 0.2.x carries durable incident state as ignorable plugin records; the
-  // query seam indexes them but its released types predate the grammar, so
-  // hits compare by record-type string and windows decode via pluginRecordOf.
-  const INCIDENT_RECORD_TYPE = 'plugin:aiops/incident-state'
-  const FEEDBACK_RECORD_TYPE = 'plugin:aiops/operator-feedback'
-  for (const session of sessions.slice(0, limits.maxScanSessions)) {
-    signal?.throwIfAborted()
-    const events = await ctx.sessionQuery.listEvents(session.header.id)
-    const reportHits = events.filter(event => event.type === (INCIDENT_RECORD_TYPE as typeof event.type))
-    const feedbackHits = events.filter(event => event.type === (FEEDBACK_RECORD_TYPE as typeof event.type))
-    const reportHit = reportHits.at(-1)
-    if (reportHit === undefined) continue
-    const reportWindow = await ctx.sessionQuery.readEvent({ sessionId: session.header.id, seq: reportHit.seq }, signal)
-    const reportRecord = pluginRecordOf(reportWindow.target)
-    if (reportRecord === undefined || reportRecord.type !== INCIDENT_RECORD_TYPE) continue
-    const incident = decodeAiopsIncidentState(reportRecord.data)
-    const feedbackHit = feedbackHits.at(-1)
-    let feedback: PortalIncident['feedback']
-    if (feedbackHit !== undefined) {
-      const feedbackWindow = await ctx.sessionQuery.readEvent({ sessionId: session.header.id, seq: feedbackHit.seq }, signal)
-      const feedbackRecord = pluginRecordOf(feedbackWindow.target)
-      if (feedbackRecord !== undefined && feedbackRecord.type === FEEDBACK_RECORD_TYPE) {
-        const decoded = decodeAiopsOperatorFeedback(feedbackRecord.data)
-        if (decoded.incidentId === incident.incidentId && decoded.reportSeq === reportHit.seq) {
-          feedback = { seq: feedbackHit.seq, time: feedbackHit.time, feedback: decoded }
+  // Incident reports and operator feedback are plugin-owned storage-domain
+  // records: the shared `aiopsIncidents` store serves them synchronously and
+  // workspace-scoped, newest report first.
+  const incidents: PortalIncident[] = ctx.aiopsIncidents.listIncidents(workspace, limits.maxScanIncidents)
+    .slice(0, limits.maxIncidents)
+    .map(record => {
+      const feedbackRecord = ctx.aiopsIncidents.latestFeedback(record.sessionId)
+      let feedback: PortalIncident['feedback']
+      if (feedbackRecord !== undefined) {
+        const decoded: AiopsOperatorFeedback = feedbackRecord.feedback
+        if (decoded.incidentId === record.incident.incidentId && decoded.reportRevision === record.revision) {
+          feedback = { time: feedbackRecord.time, feedback: decoded }
         }
       }
-    }
-    const lastRoute = latestRouteBySession.get(session.header.id)
-    incidents.push({
-      sessionId: session.header.id,
-      reportSeq: reportHit.seq,
-      reportTime: reportHit.time,
-      incident,
-      ...(feedback === undefined ? {} : { feedback }),
-      ...(lastRoute === undefined ? {} : { lastRoute }),
+      const lastRoute = latestRouteBySession.get(record.sessionId)
+      return {
+        sessionId: record.sessionId,
+        revision: record.revision,
+        updatedAt: record.updatedAt,
+        incident: record.incident,
+        ...(feedback === undefined ? {} : { feedback }),
+        ...(lastRoute === undefined ? {} : { lastRoute }),
+      }
     })
-  }
-  incidents.sort((left, right) => right.reportTime - left.reportTime || right.reportSeq - left.reportSeq)
-  const bounded = incidents.slice(0, limits.maxIncidents)
   return {
-    version: 2,
+    version: 3,
     workspace,
     generatedAt: Date.now(),
-    summary: summarizePortal(bounded, audit),
-    incidents: bounded,
+    summary: summarizePortal(incidents, audit),
+    incidents,
     audit,
     routingSettings,
     routingPolicyAudit,

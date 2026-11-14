@@ -4,7 +4,7 @@
 
 DSH Web 中的 AIOps 工作台。它注册始终可见的侧边栏 `AIOps` 入口，同时保留 Session 内的会话视图标签，并通过应用 Web Server 上固定的同源接口 `/api/aiops/portal` 汇总当前 Router 配置工作区内的最新诊断报告、对应人工反馈、路由审计、当前路由策略与策略变更审计。
 
-Portal 不保存副本、不修改 Session，也不提供修复操作。Session 事件仍是诊断真源，Router SQLite 仍是路由审计真源。接口最多扫描 `maxScanSessions` 个会话，返回 `maxIncidents` 个最新事件和 `maxAuditRecords` 条审计记录；默认分别为 500、100 和 250。
+Portal 不保存副本、不修改 Session，也不提供修复操作。插件自有事件存储（`ctx.aiopsIncidents`）仍是诊断真源，Router SQLite 仍是路由审计真源。接口最多扫描 `maxScanIncidents` 条已存事件，返回 `maxIncidents` 个最新事件和 `maxAuditRecords` 条审计记录；默认分别为 500、100 和 250。快照版本为 3，展示每条已存事件的 `revision` 与 `updatedAt`。
 
 全局工作台提供 `aiops-prometheus`、`aiops-alertmanager`、`aiops-kubernetes` 和版本化 `aiops-routing` namespace 的实时设置。数据源候选值必须通过服务端身份/只读权限测试。路由策略只有在无副作用的标准化 labels dry-run 成功后，才以 settings revision fence 原子保存；Router 会在持久化前校验并发与 Token 上限的跨字段关系。提交后实时生效并持久审计。
 

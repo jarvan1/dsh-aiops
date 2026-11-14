@@ -15,11 +15,13 @@
 - 同一 fingerprint 的待处理通知按 lifecycle status 分组为一次模型 turn；状态不同的通知保持顺序。
 - 进程重启后，处理中工作会恢复为队列项，相同的 SQLite 映射会先恢复已持久化的 Session，再追加下一条通知。
 
-每个符合策略的告警会在创建 Agent 前持久化。Router 按 fingerprint 冷却、全局/分 severity 并发、全局/分 severity Token 预留上限和队列容量决定立即启动、延迟或丢弃；critical 优先，同等级保持 FIFO。每次过滤、分组、延迟、丢弃、启动、完成或失败均写入审计。每个最终被接受的决策都会先写入可忽略的 `aiops/alert-routed` v2 Session 事件，再发送模型可见的 follow-up。事件把 `alert.startsAt` 投影为规范 T0、有界窗口，以及明确的 `prometheus_query_range`、`kubernetes_events` 与 `kubernetes_logs` 时间参数。Session JSONL 仍是诊断事实的唯一来源；router 数据库只拥有 delivery 重放、排队/审计事实以及 fingerprint 到轮次的协调状态。
+每个符合策略的告警会在创建 Agent 前持久化。Router 按 fingerprint 冷却、全局/分 severity 并发、全局/分 severity Token 预留上限和队列容量决定立即启动、延迟或丢弃；critical 优先，同等级保持 FIFO。每次过滤、分组、延迟、丢弃、启动、完成或失败均写入审计。每个最终被接受的决策都会先写入可忽略的 `aiops/alert-routed` v2 Session 事件，再发送模型可见的 follow-up。事件把 `alert.startsAt` 投影为规范 T0、有界窗口，以及明确的 `prometheus_query_range`、`kubernetes_events` 与 `kubernetes_logs` 时间参数。Session JSONL 仍是诊断叙事；router 数据库拥有 delivery 重放、排队/审计事实以及 fingerprint 到轮次的协调状态；结构化事件状态位于 `aiops_incident` 存储域。
 
 每个模型 turn 都会读取 DSH 持久化的 `locale.preference`，要求 Agent 使用该语言编写面向用户的说明和持久化事件报告文本。Host 偏好未设置或不可用时回退为英文，与 DSH Host 侧 locale fallback 一致；标识符与观测值保持原样。
 
-当 firing 告警打开新一轮时，Router 会附加诊断复用上下文：通过共享 session-query 服务（懒读取，缺失即禁用复用）在本工作区有界的 Session 历史中，寻找报告文本提及指纹身份 token 的最新已 resolved 事件，并在首轮提示词中列出其首要假设与建议，作为需对照新证据确认或舍弃的线索。追加轮次和恢复轮次不会重读历史；复用不产生写入——新轮次仍从全新报告开始。
+恢复轮次结束后，Router 会在插件自有事件存储（`ctx.aiopsIncidents`）中以确定性方式关闭生命周期：若最近存储的报告尚未 `resolved`，则以携带原状态的 `resolved` 状态写入，并附一条 `alert-recovery-<receivedAt>` 证据。该写入幂等，并与模型自己的 `aiops_incident_report` 共用同一 schema 与生命周期校验。
+
+当 firing 告警打开新一轮时，Router 会附加诊断复用上下文：通过事件存储在本工作区有界的已 resolved 记录中（`history.maxScanRecords`，默认 200），寻找报告文本提及指纹身份 token 的最新事件，并在首轮提示词中列出其首要假设与建议，作为需对照新证据确认或舍弃的线索。事件存储缺失或读取失败时复用被静默跳过；追加轮次和恢复轮次不会查询；复用不产生写入——新轮次仍从全新报告开始。
 
 ## 配置
 

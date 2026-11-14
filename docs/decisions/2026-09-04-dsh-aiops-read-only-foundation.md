@@ -1,8 +1,10 @@
 # Agent Note: Read-only DSH AIOps foundation
 
-Status: implemented
+Status: implemented (incident storage amended 2026-11-14)
 
 English | [中文](2026-09-04-dsh-aiops-read-only-foundation.zh.md)
+
+> **Amended 2026-11-14:** incident and feedback state moved from Session plugin events to the plugin-owned `aiops_incident` storage domain. The read-only boundary and package split stand. See [Move AIOps incident state into plugin-owned storage domains](2026-11-14-aiops-plugin-owned-incident-store.md).
 
 ## Problem
 

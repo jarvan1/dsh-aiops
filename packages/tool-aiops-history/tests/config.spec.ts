@@ -32,7 +32,7 @@ describe('AIOps incident history configuration', () => {
   it.each([
     [{ defaultLimit: 0 }, 'defaultLimit'],
     [{ maxLimit: 0 }, 'maxLimit'],
-    [{ maxScanSessions: 0 }, 'maxScanSessions'],
+    [{ maxScanRecords: 0 }, 'maxScanRecords'],
     [{ timeoutMs: 0 }, 'timeoutMs'],
     [{ defaultLimit: 2, maxLimit: 1 }, 'defaultLimit must not exceed maxLimit'],
     [{ timeoutMs: Number.MAX_SAFE_INTEGER }, 'timeoutMs must not exceed'],

@@ -31,8 +31,8 @@ kind: "package-group"
 | [`aiops-prometheus/`](aiops-prometheus/README.zh.md) | 只读 PromQL、规则、Target 与元数据 Service Definition 和 HTTP Provider | `ctx.prometheus` |
 | [`aiops-kubernetes/`](aiops-kubernetes/README.zh.md) | 默认直连 Kubernetes API、可选 kubectl 兼容的只读 Provider | `ctx.kubernetes` |
 | [`tool-aiops-observe/`](tool-aiops-observe/README.zh.md) | 十个面向模型的观测工具 | `ctx.tools` |
-| [`aiops-incident/`](aiops-incident/README.zh.md) | 完整报告、追加式反馈、投影与写入工具 | `aiops/incident-state`、`aiops/operator-feedback` |
-| [`tool-aiops-history/`](tool-aiops-history/README.zh.md) | 工作区范围的报告、反馈与路由审计工具 | 基于 `ctx.sessionQuery` 与 router 的 `ctx.tools` |
+| [`aiops-incident/`](aiops-incident/README.zh.md) | 插件自有存储上的完整报告、追加式反馈与写入工具 | `ctx.aiopsIncidents`、`aiops_incident` 域 |
+| [`tool-aiops-history/`](tool-aiops-history/README.zh.md) | 工作区范围的报告、反馈与路由审计工具 | 基于 `ctx.aiopsIncidents` 与 router 的 `ctx.tools` |
 | [`aiops-portal/`](aiops-portal/README.zh.md) | 只读事件及带 revision fence 的数据源/路由设置与 dry-run | `conversation.view`、`/api/aiops/portal` |
 | [`aiops-observability/`](aiops-observability/README.zh.md) | 低基数存活、就绪与 Prometheus 遥测 | `ctx.aiopsTelemetry`、`/api/aiops/{healthz,readyz,metrics}` |
 | [`webhook-alertmanager/`](webhook-alertmanager/README.zh.md) | Bearer 认证、有界的 Alertmanager v4 HTTP adapter | `ctx.webhookRuntime.dispatch()` |

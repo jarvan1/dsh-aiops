@@ -4,16 +4,35 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-14 — Plugin-owned incident store
+
+### Fixed
+
+- Fixed a fatal portability bug in `aiops_incident_report`: reports were persisted through `appendPluginRecord`, which forwards to the class-private `session.#appendRecord` and rejects any receiver created by another `dsh-session` copy. Externally installed plugins (Host `npx` dependency tree vs workspace pnpm store) therefore failed every report with `Receiver must be an instance of class Session`; the real-environment E2E reproduced 11 such failures, plus one correct rejection of a first report claiming `resolved`.
+
+### Changed
+
+- Incident and feedback state now live in the plugin-owned `aiops_incident` storage domain (`ctx.aiopsIncidents`): one zod-validated document per Session with a monotonic `revision`, plus an append-only feedback table. Writes resolve only after durability, lifecycle continuity and workspace pinning are enforced in the store, and `aiopsIncidents/changed` replaces the Session projection as the change signal. Records are per-record JSON under `<DSH_HOME>/storages/aiops_incident/`; keys that are not path-safe are hashed.
+- Delivery markers now live in the `aiops_delivery` storage domain. `aiops-delivery` subscribes to `aiopsIncidents/changed`, and terminal markers still suppress duplicate pushes across restarts.
+- The router's deterministic recovery closure and prior-diagnosis reuse report and read through the same store; reuse scans `listResolved(workspace, history.maxScanRecords)` instead of Session history (`history.maxScanSessions` was renamed).
+- The Portal snapshot is version 3, joins the latest feedback against the incident `revision`, and shows `revision`/`updatedAt`; the history tools read the store, scope reads to the caller workspace, and cite `(sessionId, revision)`. Snapshot and history reads no longer depend on `ctx.sessionQuery` or FTS reconciliation.
+- Session logs keep the diagnostic narrative only; the `aiops/incident-state` and `aiops/operator-feedback` plugin records are no longer written. Search in the history tools applies DSH's literal text filter to the bounded stored records in memory.
+
+### Validation
+
+- `pnpm run build` and the full suite pass: 25 test files, 178 tests passed plus one opt-in real-cluster test skipped (179 total). New store tests run on a real storage composition (report/revision, transition validation, durability across reopen, workspace scoping, feedback idempotence and stale-revision rejection); the incident and history packages have real Loader composition tests.
+- k3s + Alertmanager E2E against DSH 0.2.2-rc.1 (`e2e-1794650227`) passed the receiver, lifecycle, retry, burst, Session, evidence, and report matrix: the Watchdog probe was filtered at the real Prometheus → AlertmanagerConfig → receiver path, duplicate deliveries stayed idempotent, firing → resolved → reopened produced a second Session round (`aiops-b1a3d448…` round 1, `aiops-67fc11f0…` round 2), and 9 durable incident documents were written under `<DSH_HOME>/storages/aiops_incident/`, including the router's `resolved` closure with `alert-recovery-*` evidence.
+
 ## Unreleased — 2026-11-14 — Diagnosis reuse
 
 ### Added
 
-- Added best-effort diagnosis reuse in the incident router: when a firing alert opens a new round (`created` or `reopened`), the router lazily reads the shared session-query service, scans this workspace's bounded session history (new `history.maxScanSessions`/`history.maxIncidents` entry settings, defaults 200/3) for the latest resolved incident whose report text mentions a fingerprint identity token (full value or stable 8/6-char suffix), and attaches its top hypotheses and recommendations to the first-turn prompt as explicitly non-authoritative leads.
-- Reuse is silent when the query service is absent or a read fails, never runs for appended or recovery rounds, performs no writes, and adds no new hard service dependency (lazy `ctx.get`, type-only import).
+- Added best-effort diagnosis reuse in the incident router: when a firing alert opens a new round (`created` or `reopened`), the router reads this workspace's bounded stored incident records (new `history.maxScanRecords`/`history.maxIncidents` entry settings, defaults 200/3) for the latest resolved incident whose report text mentions a fingerprint identity token (full value or stable 8/6-char suffix), and attaches its top hypotheses and recommendations to the first-turn prompt as explicitly non-authoritative leads.
+- Reuse is silent when the incident store is absent or a read fails, never runs for appended or recovery rounds, performs no writes, and adds no new hard service dependency (lazy `ctx.get`, type-only import).
 
 ### Validation
 
-- Full build, 25 test files and 177 tests pass (one opt-in real-cluster test remains skipped), GitHub source-package preparation, link check, and `git diff --check` pass. New router tests cover config defaults plus end-to-end prompt attachment: matching resolved prior attached with lead-only wording, unrelated-fingerprint and unresolved priors excluded, and appended rounds not re-reading history.
+- Full build, 25 test files and 178 tests pass (one opt-in real-cluster test remains skipped), GitHub source-package preparation, link check, and `git diff --check` pass. New router tests cover config defaults plus end-to-end prompt attachment: matching resolved prior attached with lead-only wording, unrelated-fingerprint and unresolved priors excluded, and appended rounds not re-reading history.
 
 ## Unreleased — 2026-11-08 — Alert-recovery lifecycle linkage
 

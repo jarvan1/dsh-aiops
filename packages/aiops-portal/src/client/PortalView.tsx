@@ -29,7 +29,7 @@ function fmtTime(value: number): string {
 }
 
 function incidentKey(item: PortalIncident): string {
-  return `${item.sessionId}:${item.reportSeq}`
+  return `${item.sessionId}:${item.revision}`
 }
 
 function Badge({ value, tone = value }: { value: string; tone?: string }) {
@@ -48,7 +48,7 @@ function IncidentDetail({ item, t }: { item: PortalIncident; t: Props['t'] }) {
     </div>
     <dl className={css.metadata}>
       <div><dt>{t('session')}</dt><dd>{item.sessionId}</dd></div>
-      <div><dt>{t('reported')}</dt><dd>{fmtTime(item.reportTime)}</dd></div>
+      <div><dt>{t('reported')}</dt><dd>{fmtTime(item.updatedAt)}</dd></div>
       {item.lastRoute === undefined ? null : <div><dt>{t('route')}</dt><dd>{item.lastRoute.outcome} · {item.lastRoute.reason}</dd></div>}
     </dl>
     <section><h3>{t('evidence')}</h3><ul>{incident.evidence.map(value => <li key={value.id}><Badge value={value.kind}/><span>{value.summary}</span></li>)}</ul></section>
@@ -146,7 +146,7 @@ export function PortalDashboard({ loadSnapshot, loadWebhookConfiguration, testCo
       </section>
       {snapshot.incidents.length === 0 ? <div className={css.empty}>{t('empty')}</div> : <section className={css.content}>
         <div className={css.list}>{filtered.map(item => <button className={item === selected ? css.selected : ''} key={incidentKey(item)} onClick={() => setSelectedKey(incidentKey(item))}>
-          <span className={`${css.rail} ${css[`rail_${item.incident.severity}`]}`}/><span className={css.itemBody}><span className={css.itemTop}><strong>{item.incident.title}</strong><time>{fmtTime(item.reportTime)}</time></span><span className={css.itemBottom}><span className={css.badges}><Badge value={item.incident.severity}/><Badge value={item.incident.status}/>{item.feedback === undefined ? null : <Badge value={item.feedback.feedback.verdict}/>}</span><code>{item.sessionId.slice(0, 18)}</code></span></span>
+          <span className={`${css.rail} ${css[`rail_${item.incident.severity}`]}`}/><span className={css.itemBody}><span className={css.itemTop}><strong>{item.incident.title}</strong><time>{fmtTime(item.updatedAt)}</time></span><span className={css.itemBottom}><span className={css.badges}><Badge value={item.incident.severity}/><Badge value={item.incident.status}/>{item.feedback === undefined ? null : <Badge value={item.feedback.feedback.verdict}/>}</span><code>{item.sessionId.slice(0, 18)}</code></span></span>
         </button>)}{filtered.length === 0 ? <div className={css.empty}>{t('results', { count: 0 })}</div> : null}</div>
         {selected === undefined ? null : <IncidentDetail item={selected} t={t}/>}
       </section>}

@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包为每个 Agent Session 记录结构化事件报告，并把值班人员对报告的确认、修正或否定追加为独立反馈。模型通过 `aiops_incident_report` 写入完整当前报告；每次接受的写入都会成为 `aiops/incident-state` 事件。只有在用户明确表达 verdict 后，`aiops_incident_feedback` 才会追加 `aiops/operator-feedback`，引用当时报告的事件序号且不改写报告。插件挂载时，`aiopsIncident` 和 `aiopsIncidentFeedback` 投影分别暴露最新报告与最新反馈。
+本包为每个 Agent Session 记录结构化事件报告，并把值班人员对报告的确认、修正或否定追加为独立反馈。模型通过 `aiops_incident_report` 写入完整当前报告；每次接受的写入都会成为插件自有 `aiops_incident` 存储域中的一条持久记录（每个 Session 一份 JSON 文档，`revision` 单调递增）。只有在用户明确表达 verdict 后，`aiops_incident_feedback` 才会追加反馈，引用当时审核的 `reportRevision` 且不改写报告。`ctx.aiopsIncidents` 服务同步暴露最新报告与反馈，每次持久写入后发出 `aiopsIncidents/changed`，且完全不依赖 Session 插件记录——DSH 把后者保留给 Host 自带包。
 
 ## 目录
 
@@ -25,13 +25,15 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-将其与 Session 持久化、投影和工具 Service 一起挂载。
+将其与存储栈（`dsh-storage` + `dsh-storage-json` 之类的后端 + `dsh-storage-domain`）和工具 Service 一起挂载。
 
 ### 最小配置
 
 ```yaml
 - name: '@deepseek-ai/dsh-aiops-incident'
 ```
+
+事件存储通过 `ctx.storageDomain` 打开 `aiops_incident` 域；DSH 基础 profile 已挂载存储 hub、位于 `<DSH_HOME>/storages` 的 JSON 后端与域表单。
 
 注册的工具 schema 是完整报告与追加式反馈字段的权威来源。`corrected` verdict 必须包含 correction；其他 verdict 不接受 correction。
 
@@ -43,15 +45,16 @@ kind: "package-reference"
 <details>
 <summary>实现内部机制——点击展开</summary>
 
-模型/工具 JSON 边界会修剪并限制文本、为事件、证据与反馈 ID 添加品牌、接受显式的告警/指标/Kubernetes/日志/变更来源、拒绝重复证据，并验证每个假设引用。报告写入和反馈写入都在追加前后执行持久化检查点；反馈 ID 从 Session 与工具 call identity 确定性派生，因此重放不会重复追加。反馈引用准确的 `reportSeq`，所以后续报告更新不会改变它当时审核的对象。当 `ctx.sessionQuery` 存在时，本包为报告与反馈分别注册带修订号的语义提取。
+模型/工具 JSON 边界会修剪并限制文本、为事件、证据与反馈 ID 添加品牌、接受显式的告警/指标/Kubernetes/日志/变更来源、拒绝重复证据，并验证每个假设引用。报告写入会对照已存记录校验生命周期转换（首份报告不能是 `resolved`；事件身份稳定；`resolved` 为终态），且仅在介质持久化后返回。反馈 ID 从 Session 与工具 call identity 确定性派生，因此重放返回已存记录而不是重复追加；绑定已被取代 revision 的反馈会被拒绝。在 per-record JSON 布局下不安全作为路径段的记录键会改用 SHA-256 摘要。
 
 | 文件 | 作用 |
 |---|---|
-| [`src/types.ts`](src/types.ts) | 持久事件、领域记录与投影类型映射 |
+| [`src/types.ts`](src/types.ts) | 记录类型、领域状态与品牌类型 |
 | [`src/domain.ts`](src/domain.ts) | 严格解码与生命周期校验 |
-| [`src/feedback.ts`](src/feedback.ts) | 追加式值班反馈的严格解码与投影 schema |
-| [`src/index.ts`](src/index.ts) | 报告/反馈投影、持久化检查点、语义文本贡献与面向模型的工具 |
-| — | 不发布 invariant companion，因为完整事件由唯一投影解码，写入路径也在追加前检查生命周期连续性 |
+| [`src/feedback.ts`](src/feedback.ts) | 追加式值班反馈的严格解码 |
+| [`src/store.ts`](src/store.ts) | `aiops_incident` 存储域声明与 `ctx.aiopsIncidents` 服务 |
+| [`src/index.ts`](src/index.ts) | 存储挂载、语义搜索文本与面向模型的工具 |
+| — | 不发布 invariant companion，因为唯一存储在持久边界解码每条记录，写入路径也在提交前检查生命周期连续性 |
 
 </details>
 
@@ -61,7 +64,7 @@ kind: "package-reference"
 ## 进一步探索
 
 - [AIOps 子系统](../../docs/aiops.zh.md)——领域流程与只读边界。
-- [DSH Session 投影](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session/session-projection/README.zh.md)——当前状态重放语义。
+- [DSH 存储域](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/storage/storage-domain/README.zh.md)——schema 校验、变更事件驱动的 KV 域。
 - [观测工具](../tool-aiops-observe/README.zh.md)——证据采集。
 - [AIOps 基础决策](../../docs/decisions/2026-09-04-dsh-aiops-read-only-foundation.zh.md)——包与安全选择。
 
@@ -98,4 +101,4 @@ kind: "package-reference"
 - **每个 Session 一个事件**——不同事件需要新的 Session；当前不表示合并、父子事件关联或重新打开。
 - **反馈不是事实改写**——反馈只表达操作员对特定报告版本的 verdict；要修订当前报告仍需另一次完整 `aiops_incident_report` 写入。
 - **没有自动修复**——建议只是存储的文本，绝不会授权或执行基础设施变更。
-- **没有独立事件数据库**——持久化复用现有 Session 日志与投影栈；[`dsh-tool-aiops-history`](../tool-aiops-history/README.zh.md) 查询可丢弃的派生索引，但不替换该真源。
+- **存储布局由部署方负责**——记录位于 `<DSH_HOME>/storages/aiops_incident/`；请与 Session workspace 一起备份该目录，并注意不再匹配当前 schema 的记录会在启动时被移走并跳过。

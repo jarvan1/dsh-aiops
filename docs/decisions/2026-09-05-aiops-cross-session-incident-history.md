@@ -1,8 +1,10 @@
 # Agent Note: AIOps cross-Session incident history
 
-Status: implemented
+Status: implemented (storage source superseded 2026-11-14)
 
 English | [中文](2026-09-05-aiops-cross-session-incident-history.zh.md)
+
+> **Superseded in part (2026-11-14):** the history tools now read the plugin-owned `aiops_incident` storage domain directly; the `ctx.sessionQuery` FTS index is no longer part of this path. Workspace scoping and cited exact reads remain. See [Move AIOps incident state into plugin-owned storage domains](2026-11-14-aiops-plugin-owned-incident-store.md).
 
 ## Problem
 

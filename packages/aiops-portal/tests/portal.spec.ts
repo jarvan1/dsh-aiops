@@ -26,8 +26,8 @@ const routingSettings: RoutingSettings = {
 function incident(overrides: Partial<PortalIncident> = {}): PortalIncident {
   return {
     sessionId: 'aiops-session-1',
-    reportSeq: 3,
-    reportTime: 1_000,
+    revision: 3,
+    updatedAt: 1_000,
     incident: {
       version: 1,
       incidentId: 'incident-1' as never,
@@ -194,13 +194,12 @@ describe('AIOps Portal read model', () => {
   it('summarizes active, severity, review, and audit outcomes', () => {
     const reviewed = incident({
       feedback: {
-        seq: 4,
         time: 1_100,
         feedback: {
           version: 1,
           feedbackId: 'feedback-1' as never,
           incidentId: 'incident-1' as never,
-          reportSeq: 3,
+          reportRevision: 3,
           verdict: 'corrected',
           note: 'The pool was healthy.',
           correction: 'A downstream dependency was saturated.',
@@ -213,19 +212,22 @@ describe('AIOps Portal read model', () => {
   })
 
   it('filters across structured diagnosis content and review state', () => {
-    const reviewed = incident({ feedback: { seq: 4, time: 1_100, feedback: { version: 1, feedbackId: 'f' as never, incidentId: 'incident-1' as never, reportSeq: 3, verdict: 'confirmed', note: 'verified by operator', origin: 'operator-via-agent' } } })
+    const reviewed = incident({ feedback: { time: 1_100, feedback: { version: 1, feedbackId: 'f' as never, incidentId: 'incident-1' as never, reportRevision: 3, verdict: 'confirmed', note: 'verified by operator', origin: 'operator-via-agent' } } })
     expect(filterPortalIncidents([reviewed], { query: 'database saturation', severity: 'critical', status: 'all', review: 'reviewed' })).toEqual([reviewed])
     expect(filterPortalIncidents([reviewed], { query: '', severity: 'warning', status: 'all', review: 'all' })).toEqual([])
   })
 
-  it('reads only the configured workspace and keeps the latest report per session', async () => {
+  it('reads only the configured workspace and joins the latest review per session', () => {
     vi.spyOn(Date, 'now').mockReturnValue(9_999)
     const older = incident().incident
     const latest = { ...older, title: 'Latest diagnosis' }
-    const reportHits = [
-      { sessionId: 'aiops-session-1', seq: 2, time: 900, type: 'plugin:aiops/incident-state' },
-      { sessionId: 'aiops-session-1', seq: 3, time: 1_000, type: 'plugin:aiops/incident-state' },
-    ]
+    const listIncidents = vi.fn((workspace?: string) => workspace === '/srv/prod'
+      ? [
+        { sessionId: 'aiops-session-1', workspace: '/srv/prod', revision: 3, updatedAt: 1_000, incident: latest },
+        { sessionId: 'aiops-session-2', workspace: '/srv/prod', revision: 1, updatedAt: 2_000, incident: older },
+      ]
+      : [])
+    const staleFeedback = { sessionId: 'aiops-session-2', time: 1_500, feedback: { version: 1, feedbackId: 'f' as never, incidentId: 'incident-1' as never, reportRevision: 4, verdict: 'confirmed', note: 'stale', origin: 'operator-via-agent' } }
     const ctx = {
       aiopsIncidentRouter: {
         workspacePath: '/srv/prod',
@@ -233,16 +235,19 @@ describe('AIOps Portal read model', () => {
         routingSettings: () => routingSettings,
         listPolicyAudit: () => [],
       },
-      sessionQuery: {
-        filterSessions: vi.fn(async () => [{ header: { id: 'aiops-session-1' } }]),
-        listEvents: vi.fn(async () => reportHits),
-        readEvent: vi.fn(async ({ seq }: { seq: number }) => ({ target: { type: 'plugin:aiops/incident-state', ignorable: true, data: seq === 3 ? latest : older } })),
+      aiopsIncidents: {
+        listIncidents,
+        latestFeedback: vi.fn((sessionId: string) => sessionId === 'aiops-session-2' ? staleFeedback : undefined),
       },
     }
-    const snapshot = await readPortalSnapshot(ctx as never, { maxIncidents: 10, maxAuditRecords: 10, maxScanSessions: 10 })
-    expect(ctx.sessionQuery.filterSessions).toHaveBeenCalledWith([{ kind: 'cwd', values: ['/srv/prod'] }], undefined)
-    expect(snapshot).toMatchObject({ version: 2, workspace: '/srv/prod', generatedAt: 9_999, routingSettings, routingPolicyAudit: [] })
-    expect(snapshot.incidents).toHaveLength(1)
-    expect(snapshot.incidents[0]).toMatchObject({ reportSeq: 3, incident: { title: 'Latest diagnosis' }, lastRoute: { outcome: 'completed' } })
+    const snapshot = readPortalSnapshot(ctx as never, { maxIncidents: 10, maxAuditRecords: 10, maxScanIncidents: 10 })
+    expect(listIncidents).toHaveBeenCalledWith('/srv/prod', 10)
+    expect(snapshot).toMatchObject({ version: 3, workspace: '/srv/prod', generatedAt: 9_999, routingSettings, routingPolicyAudit: [] })
+    expect(snapshot.incidents).toHaveLength(2)
+    expect(snapshot.incidents[0]).toMatchObject({ sessionId: 'aiops-session-1', revision: 3, updatedAt: 1_000, incident: { title: 'Latest diagnosis' }, lastRoute: { outcome: 'completed' } })
+    // Feedback pinned to a superseded revision is dropped rather than shown.
+    expect(snapshot.incidents[1]).toMatchObject({ sessionId: 'aiops-session-2' })
+    expect(snapshot.incidents[1]?.feedback).toBeUndefined()
+    expect(snapshot.summary).toMatchObject({ totalIncidents: 2, active: 2, reviewed: 0 })
   })
 })

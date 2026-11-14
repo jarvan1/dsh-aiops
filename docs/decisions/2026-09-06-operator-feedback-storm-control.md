@@ -2,7 +2,9 @@
 
 English | [中文](2026-09-06-operator-feedback-storm-control.zh.md)
 
-Status: accepted
+Status: accepted (storage mechanism amended 2026-11-14)
+
+> **Amended 2026-11-14:** verdicts are now append-only rows in the `aiops_incident` feedback table and cite the reviewed `reportRevision`; the verdict rules and storm-control controls are unchanged. See [Move AIOps incident state into plugin-owned storage domains](2026-11-14-aiops-plugin-owned-incident-store.md).
 
 ## Decision
 

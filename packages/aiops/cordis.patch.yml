@@ -74,7 +74,7 @@
         # Best-effort prior-diagnosis reuse: bounded workspace-history reads
         # that attach resolved matching incidents as leads on a new round.
         history:
-          maxScanSessions: 200
+          maxScanRecords: 200
           maxIncidents: 3
 
     - id: aiops-alertmanager-webhook-ingress
@@ -156,7 +156,7 @@
       config:
         defaultLimit: 20
         maxLimit: 100
-        maxScanSessions: 500
+        maxScanRecords: 500
         timeoutMs: 30000
 
     # Read-only Web tab over the configured diagnosis workspace. The endpoint
@@ -166,6 +166,6 @@
       config:
         maxIncidents: 100
         maxAuditRecords: 250
-        maxScanSessions: 500
+        maxScanIncidents: 500
         webhookUrl: !!js process.env.AIOPS_WEBHOOK_PUBLIC_URL || 'http://127.0.0.1:3081/alertmanager'
         webhookSecretRef: AIOPS_ALERTMANAGER_WEBHOOK_SECRET

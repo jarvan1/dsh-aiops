@@ -23,12 +23,12 @@ export * from './snapshot.ts'
 export * from './types.ts'
 
 export const name = 'aiops-portal'
-export const inject = ['sessionQuery', 'aiopsIncidentRouter', 'kubernetes', 'credentials']
+export const inject = ['aiopsIncidents', 'aiopsIncidentRouter', 'kubernetes', 'credentials']
 
 export interface Config {
   readonly maxIncidents?: number
   readonly maxAuditRecords?: number
-  readonly maxScanSessions?: number
+  readonly maxScanIncidents?: number
   readonly webhookUrl?: string
   readonly webhookSecretRef?: string
 }
@@ -36,7 +36,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   maxIncidents: z.number().step(1).min(1).max(500).default(100),
   maxAuditRecords: z.number().step(1).min(1).max(1000).default(250),
-  maxScanSessions: z.number().step(1).min(1).max(5000).default(500),
+  maxScanIncidents: z.number().step(1).min(1).max(5000).default(500),
   webhookUrl: z.string().default('http://127.0.0.1:3081/alertmanager'),
   webhookSecretRef: z.string().role('credential-ref').default('AIOPS_ALERTMANAGER_WEBHOOK_SECRET'),
 })
@@ -45,7 +45,7 @@ function limitsOf(config: Config): PortalLimits {
   return {
     maxIncidents: config.maxIncidents ?? 100,
     maxAuditRecords: config.maxAuditRecords ?? 250,
-    maxScanSessions: config.maxScanSessions ?? 500,
+    maxScanIncidents: config.maxScanIncidents ?? 500,
   }
 }
 
@@ -165,7 +165,7 @@ export function apply(ctx: Context, config: Config): void {
       req.once('aborted', abort)
       res.once('close', abortIfUnfinished)
       try {
-        json(res, 200, await readPortalSnapshot(webCtx, limits, controller.signal), method === 'HEAD')
+        json(res, 200, readPortalSnapshot(webCtx, limits), method === 'HEAD')
       } catch (error) {
         if (!controller.signal.aborted) {
           webCtx.logger.warn(error)

@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-This package records a structured incident report per Agent Session and appends operator confirmations, corrections, or rejections as separate feedback. The model writes complete current reports through `aiops_incident_report`; every accepted write becomes an `aiops/incident-state` event. Only after an explicit user verdict may `aiops_incident_feedback` append `aiops/operator-feedback`, citing the reviewed report sequence without rewriting it. The `aiopsIncident` and `aiopsIncidentFeedback` projections expose the latest report and feedback.
+This package records a structured incident report per Agent Session and appends operator confirmations, corrections, or rejections as separate feedback. The model writes complete current reports through `aiops_incident_report`; every accepted write becomes one durable record in the plugin-owned `aiops_incident` storage domain (one JSON document per Session, monotonic `revision`). Only after an explicit user verdict may `aiops_incident_feedback` append feedback, citing the reviewed `reportRevision` without rewriting the report. The `ctx.aiopsIncidents` service exposes the latest report and feedback synchronously, emits `aiopsIncidents/changed` after each durable write, and never depends on Session plugin records — DSH reserves those for Host-built packages.
 
 ## Table of Contents
 
@@ -25,13 +25,15 @@ This package records a structured incident report per Agent Session and appends 
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount it with Session persistence, projection, and tool services.
+Mount it with the storage stack (`dsh-storage` + a backend such as `dsh-storage-json` + `dsh-storage-domain`) and the tool service.
 
 ### Minimal configuration
 
 ```yaml
 - name: '@deepseek-ai/dsh-aiops-incident'
 ```
+
+The incident store opens the `aiops_incident` domain through `ctx.storageDomain`; DSH's base profile already mounts the storage hub, the JSON backend at `<DSH_HOME>/storages`, and the domain form.
 
 The registered tool schemas exhaustively define complete reports and append-only feedback. A `corrected` verdict requires `correction`; other verdicts reject it.
 
@@ -43,15 +45,16 @@ The registered tool schemas exhaustively define complete reports and append-only
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The model/tool JSON boundary trims and bounds text; brands incident, evidence, and feedback IDs; accepts explicit alert/metric/Kubernetes/log/change origins; rejects duplicate evidence; and verifies every hypothesis reference. Report and feedback writes checkpoint persistence before and after append. Feedback IDs derive deterministically from the Session and tool-call identity, so replay does not append duplicates. Each feedback cites the exact `reportSeq`, so later report updates do not change what was reviewed. When `ctx.sessionQuery` is present, the package registers separate revisioned semantic extraction for reports and feedback.
+The model/tool JSON boundary trims and bounds text; brands incident, evidence, and feedback IDs; accepts explicit alert/metric/Kubernetes/log/change origins; rejects duplicate evidence; and verifies every hypothesis reference. Reports validate the lifecycle transition against the stored record (first report cannot be `resolved`; the incident identity is stable; `resolved` is terminal) and the store resolves after the medium is durable. Feedback IDs derive deterministically from the Session and tool-call identity, so replay returns the stored record instead of appending a duplicate; feedback pinned to a superseded revision is rejected. Record keys that would not be path-safe over the per-record JSON layout are replaced by a SHA-256 digest.
 
 | File | Role |
 |---|---|
-| [`src/types.ts`](src/types.ts) | Durable event, domain records, and projection type maps |
+| [`src/types.ts`](src/types.ts) | Record types, domain state, and brand types |
 | [`src/domain.ts`](src/domain.ts) | Strict decoding and lifecycle validation |
-| [`src/feedback.ts`](src/feedback.ts) | Strict append-only operator-feedback decoder and projection schema |
-| [`src/index.ts`](src/index.ts) | Report/feedback projections, persistence checkpoints, semantic text, and model-facing tools |
-| — | No invariant companion is published because the complete event is decoded by the only projection and the write path checks lifecycle continuity before append |
+| [`src/feedback.ts`](src/feedback.ts) | Strict append-only operator-feedback decoder |
+| [`src/store.ts`](src/store.ts) | `aiops_incident` storage-domain spec and the `ctx.aiopsIncidents` service |
+| [`src/index.ts`](src/index.ts) | Store mounting, semantic search text, and model-facing tools |
+| — | No invariant companion is published because the single store decodes every record at the durable boundary and the write path checks lifecycle continuity before commit |
 
 </details>
 
@@ -61,7 +64,7 @@ The model/tool JSON boundary trims and bounds text; brands incident, evidence, a
 ## Further Exploration
 
 - [AIOps subsystem](../../docs/aiops.md) — domain flow and read-only boundary.
-- [DSH Session projection](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session/session-projection/README.md) — current-state replay semantics.
+- [DSH storage domain](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/storage/storage-domain/README.md) — schema-validated, change-emitting KV domains.
 - [Observation tools](../tool-aiops-observe/README.md) — evidence acquisition.
 - [AIOps foundation decision](../../docs/decisions/2026-09-04-dsh-aiops-read-only-foundation.md) — package and safety choices.
 
@@ -98,4 +101,4 @@ The tool-schema prefix remains stable until registration changes. Reports append
 - **One incident per Session** — a different incident requires a new Session; merge, parent/child incident linkage, and reopening are not represented.
 - **Feedback does not rewrite fact** — feedback records an operator verdict on one report version; revising current incident state still requires another complete `aiops_incident_report` write.
 - **No automated remediation** — recommendations are stored text and never authorize or execute infrastructure changes.
-- **No independent incident database** — persistence uses the existing Session log and projection stack; [`dsh-tool-aiops-history`](../tool-aiops-history/README.md) queries a disposable derived index without replacing that source of truth.
+- **Storage layout is deployment-owned** — records live under `<DSH_HOME>/storages/aiops_incident/`; back that directory up with the Session workspace, and note a record that no longer matches the schema is moved aside and skipped at startup.

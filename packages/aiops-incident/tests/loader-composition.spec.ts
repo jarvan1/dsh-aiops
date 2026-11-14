@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -7,11 +7,9 @@ import { Context } from '@deepseek-ai/cordis'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
-// DSH 0.2.x: this plugin no longer has a default export; the Loader resolves it
-// from its named `name`/`apply` exports, so import the namespace.
-import * as JsonlSessionPersistence from '@deepseek-ai/dsh-session-persistence-jsonl'
-import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
+import Storage from '@deepseek-ai/dsh-storage'
+import * as JsonBackend from '@deepseek-ai/dsh-storage-json'
+import * as StorageDomain from '@deepseek-ai/dsh-storage-domain'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import * as Incident from '../src/index.ts'
@@ -27,17 +25,22 @@ afterEach(async () => {
   root = undefined
 })
 
+async function listFiles(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true, recursive: true })
+  return entries.filter(entry => entry.isFile()).map(entry => join(entry.parentPath, entry.name))
+}
+
 describe('AIOps incident through a real Loader composition', () => {
-  it('persists one complete report and exposes the same projected current state', async () => {
+  it('persists reports and feedback in the plugin-owned storage domain', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-aiops-incident-loader-'))
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
-      "- name: '@deepseek-ai/dsh-session'",
-      "- name: '@deepseek-ai/dsh-session-persistence-jsonl'",
+      "- name: '@deepseek-ai/dsh-storage-json'",
       '  config:',
-      `    root: ${JSON.stringify(join(root, 'sessions'))}`,
-      '    compression: none',
-      "- name: '@deepseek-ai/dsh-session-projection'",
+      `    root: ${JSON.stringify(join(root, 'storages'))}`,
+      "- name: '@deepseek-ai/dsh-storage-domain'",
+      '  config:',
+      '    backend: json',
       "- name: '@deepseek-ai/dsh-system-prompt'",
       "- name: '@deepseek-ai/dsh-tools'",
       "- name: '@deepseek-ai/dsh-aiops-incident'",
@@ -47,12 +50,14 @@ describe('AIOps incident through a real Loader composition', () => {
     const ctx = new Context()
     context = ctx
     ctx.baseUrl = pathToFileURL(root).href + '/'
+    // The storage hub is a Service class without `apply`, so it mounts directly
+    // rather than through the Loader; its backends and consumers load via yml.
+    await ctx.plugin(Storage)
     await ctx.plugin(Loader)
     ctx.loader.builtins.include = Include
     const modules = new Map<string, unknown>([
-      ['@deepseek-ai/dsh-session', SessionStore],
-      ['@deepseek-ai/dsh-session-persistence-jsonl', JsonlSessionPersistence],
-      ['@deepseek-ai/dsh-session-projection', SessionProjectionRegistry],
+      ['@deepseek-ai/dsh-storage-json', JsonBackend],
+      ['@deepseek-ai/dsh-storage-domain', StorageDomain],
       ['@deepseek-ai/dsh-system-prompt', SystemPrompt],
       ['@deepseek-ai/dsh-tools', ToolRuntime],
       ['@deepseek-ai/dsh-aiops-incident', Incident],
@@ -68,8 +73,8 @@ describe('AIOps incident through a real Loader composition', () => {
     await ctx.loader.await()
     installTestToolExecutor(ctx)
 
-    const session = ctx.sessions.create(SessionId('aiops-incident-loader'), { meta: { cwd: root } })
-    const writeHandle = await ctx.sessionPersistence.create(session.header)
+    const session = { id: 'aiops-incident-loader', header: { cwd: root } }
+    const agent = { session } as unknown as Agent
     const report = {
       version: 1,
       incidentId: 'inc-payments-1',
@@ -83,40 +88,47 @@ describe('AIOps incident through a real Loader composition', () => {
     const result = await executeTestTool(ctx, {
       name: 'aiops_incident_report',
       arguments: { incident: report },
-      agent: { session } as unknown as Agent,
+      agent,
     })
+    if (result.isError) console.log('REPORT RESULT', JSON.stringify(result, null, 2))
     expect(result.isError).toBe(false)
-    expect(ctx.sessionProjections.stateOf(session, 'aiopsIncident')).toEqual(report)
+    expect(ctx.aiopsIncidents.get('aiops-incident-loader')).toMatchObject({
+      sessionId: 'aiops-incident-loader',
+      workspace: root,
+      revision: 1,
+      incident: report,
+    })
+    // The report is a durable document in the plugin-owned storage medium.
+    const storedFiles = await listFiles(join(root, 'storages'))
+    expect(storedFiles.some(path => path.includes('aiops_incident') && path.endsWith('aiops-incident-loader.json'))).toBe(true)
 
     const feedbackCall = {
       name: 'aiops_incident_feedback',
       callId: 'incident-feedback',
       arguments: { verdict: 'corrected', note: 'The operator found a rollout correlation.', correction: 'A bad rollout caused the latency.' },
-      agent: { session } as unknown as Agent,
+      agent,
     }
     const feedback = await executeTestTool(ctx, feedbackCall)
     expect(feedback.isError).toBe(false)
-    expect(ctx.sessionProjections.stateOf(session, 'aiopsIncidentFeedback')).toMatchObject({
-      incidentId: 'inc-payments-1', verdict: 'corrected', reportSeq: 0,
+    expect(ctx.aiopsIncidents.latestFeedback('aiops-incident-loader')?.feedback).toMatchObject({
+      incidentId: 'inc-payments-1', verdict: 'corrected', reportRevision: 1,
     })
     const replayedFeedback = await executeTestTool(ctx, feedbackCall)
     expect(replayedFeedback.isError).toBe(false)
+    expect(ctx.aiopsIncidents.listFeedback(root)).toHaveLength(1)
 
-    await writeHandle.close()
-    const readHandle = await ctx.sessionPersistence.open(session.id, 'read')
-    const durable = (await readHandle.read()).events
-    await readHandle.close()
-    expect(durable).toHaveLength(2)
-    expect(durable[0]).toMatchObject({
-      type: 'plugin:aiops/incident-state',
-      data: report,
-      ignorable: true,
+    // A replacement report bumps the revision; replaying the same feedback
+    // call stays idempotent (same call id → same feedback id → stored record).
+    const updated = await executeTestTool(ctx, {
+      name: 'aiops_incident_report',
+      arguments: { incident: { ...report, status: 'identified' } },
+      agent,
     })
-    expect(durable[1]).toMatchObject({
-      type: 'plugin:aiops/operator-feedback',
-      data: { verdict: 'corrected' },
-      ignorable: true,
-    })
+    expect(updated.isError).toBe(false)
+    expect(ctx.aiopsIncidents.get('aiops-incident-loader')?.revision).toBe(2)
+    const replayedAfterBump = await executeTestTool(ctx, feedbackCall)
+    expect(replayedAfterBump.isError).toBe(false)
+    expect(ctx.aiopsIncidents.listFeedback(root)).toHaveLength(1)
 
     expect(ctx.tools.get('aiops_incident_report')?.presentCall?.({ incident: report })).toEqual({
       card: 'generic', title: 'Record AIOps incident', kind: 'other', rawInput: report,
@@ -129,19 +141,9 @@ describe('AIOps incident through a real Loader composition', () => {
     const invalidFeedback = await executeTestTool(ctx, {
       name: 'aiops_incident_feedback',
       arguments: { verdict: 'corrected', note: 'Missing correction.' },
-      agent: { session } as unknown as Agent,
+      agent,
     })
     expect(invalidFeedback.isError).toBe(true)
-
-    const originalFlush = ctx.sessions.flush.bind(ctx.sessions)
-    ctx.sessions.flush = () => Promise.resolve(false)
-    const uncertain = await executeTestTool(ctx, {
-      name: 'aiops_incident_report',
-      arguments: { incident: report },
-      agent: { session } as unknown as Agent,
-    })
-    ctx.sessions.flush = originalFlush
-    expect(uncertain.isError).toBe(true)
 
     const entry = [...ctx.loader.entries()].find(candidate => candidate.options.name === '@deepseek-ai/dsh-aiops-incident')
     if (entry?.fiber === undefined) throw new Error('missing incident Loader fiber')

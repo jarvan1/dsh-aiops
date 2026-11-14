@@ -1,11 +1,10 @@
-import { brandString } from '@deepseek-ai/dsh-brand'
-import type { AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
-import { appendPluginRecord, Session, type SessionId } from '@deepseek-ai/dsh-session'
+import type { AiopsIncidentRecord, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
 import { describe, expect, it, vi } from 'vitest'
 import { apply, renderDeliveryMessage } from '../src/index.ts'
 import type { AiopsDeliveryRecord } from '../src/types.ts'
 
 const WEBHOOK_URL = 'https://im-hook.test/token'
+const SESSION_ID = 'aiops-session-1'
 
 function incident(overrides: Partial<AiopsIncidentState> = {}): AiopsIncidentState {
   return {
@@ -21,67 +20,81 @@ function incident(overrides: Partial<AiopsIncidentState> = {}): AiopsIncidentSta
   }
 }
 
-function deliveryMarkers(session: Session): AiopsDeliveryRecord[] {
-  return session.snapshotEvents()
-    .map(event => event.type === 'plugin:aiops/delivery' && event.ignorable === true
-      ? event.data as AiopsDeliveryRecord
-      : undefined)
-    .filter((value): value is AiopsDeliveryRecord => value !== undefined)
+/** In-memory stand-in for one opened storage domain with a `markers` table. */
+function fakeStorageDomain(failPuts = false) {
+  const records = new Map<string, unknown>()
+  const openCalls: number[] = []
+  return {
+    records,
+    openCalls,
+    open: async () => {
+      openCalls.push(1)
+      return {
+        table: (name: string) => (name === 'markers'
+          ? {
+            get: (key: string) => records.get(key),
+            put: async (key: string, value: unknown) => {
+              if (failPuts) throw new Error('medium is read-only')
+              records.set(key, value)
+            },
+          }
+          : undefined),
+        close: async () => {},
+      }
+    },
+  }
 }
+
+type FakeDomain = ReturnType<typeof fakeStorageDomain>
 
 interface HarnessOptions {
   readonly config?: Partial<Parameters<typeof apply>[1]>
   /** `null` resolves no credential; a string is the credential value. */
   readonly credential?: string | null
   readonly fetchImpl?: typeof globalThis.fetch
-  readonly flushOk?: boolean
+  readonly failMarkerPuts?: boolean
+  /** Reuse another harness's marker domain to model a restart. */
+  readonly sharedDomain?: FakeDomain
 }
 
-function composeHarness(options: HarnessOptions = {}) {
-  const session = Session.create(brandString<SessionId>('aiops-session-1'))
-  const listeners: Array<(session: Session, key: string, value: unknown, seq: number) => void> = []
-  const flush = vi.fn(async () => options.flushOk ?? true)
+async function composeHarness(options: HarnessOptions = {}) {
   const credential = options.credential === undefined ? WEBHOOK_URL : options.credential
   const resolve = vi.fn(async () => credential === null
     ? undefined
     : { value: credential } as never)
   const fetchMock = options.fetchImpl ?? vi.fn(async () => new Response(JSON.stringify({ code: 0 }), { status: 200 }))
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
-  const sessionQuery = {
-    listEvents: vi.fn(async () => session.snapshotEvents().map(event => ({
-      sessionId: session.id,
-      seq: event.seq,
-      time: event.time,
-      type: event.type,
-    }))),
-    readEvent: vi.fn(async ({ seq }: { seq: number }) => {
-      const target = session.snapshotEvents().find(event => event.seq === seq)
-      if (target === undefined) throw new Error(`no event at seq ${seq}`)
-      return { session, target }
-    }),
-  }
+  const domain = options.sharedDomain ?? fakeStorageDomain(options.failMarkerPuts === true)
+  const listeners: Array<(record: AiopsIncidentRecord) => void> = []
   const ctx = {
     credentials: { resolve },
-    sessionProjections: {
+    storageDomain: domain,
+    aiopsIncidents: {
       onChanged: vi.fn((listener: (typeof listeners)[number]) => {
         listeners.push(listener)
         return () => {}
       }),
     },
-    sessionQuery,
-    sessions: { flush },
     logger,
-    effect: (setup: () => unknown) => setup(),
+    effect: (setup: () => unknown) => {
+      const dispose = setup()
+      return typeof dispose === 'function' ? dispose : () => {}
+    },
   }
-  apply(ctx as never, { webhookUrlEnv: 'AIOPS_DELIVERY_WEBHOOK_URL', ...options.config }, fetchMock)
-  return { session, listener: listeners[0]!, fetchMock, flush, resolve, logger }
+  await apply(ctx as never, { webhookUrlEnv: 'AIOPS_DELIVERY_WEBHOOK_URL', ...options.config }, fetchMock)
+  const emit = (revision: number, state: AiopsIncidentState = incident()) => {
+    const record: AiopsIncidentRecord = { sessionId: SESSION_ID, workspace: '/ws', revision, updatedAt: Date.now(), incident: state }
+    for (const listener of listeners) listener(record)
+  }
+  const markerOf = () => domain.records.get(SESSION_ID) as AiopsDeliveryRecord | undefined
+  return { emit, domain, fetchMock, resolve, logger, markerOf }
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 40))
 
 describe('aiops-delivery message renderers', () => {
   it('renders a Feishu interactive card bounded in length', () => {
-    const message = renderDeliveryMessage('feishu', incident(), { sessionId: 'aiops-session-1', reportSeq: 7, portalUrl: 'https://portal.example.test/aiops/' })
+    const message = renderDeliveryMessage('feishu', incident(), { sessionId: SESSION_ID, reportRevision: 7, portalUrl: 'https://portal.example.test/aiops/' })
     expect(message.title).toContain('[AIOps]')
     const payload = JSON.parse(message.body) as {
       msg_type: string
@@ -98,21 +111,21 @@ describe('aiops-delivery message renderers', () => {
   })
 
   it('omits the portal action and renders info severity for Feishu', () => {
-    const message = renderDeliveryMessage('feishu', incident({ severity: 'info' }), { sessionId: 's', reportSeq: 1 })
+    const message = renderDeliveryMessage('feishu', incident({ severity: 'info' }), { sessionId: 's', reportRevision: 1 })
     const payload = JSON.parse(message.body) as { card: { header: { template: string }; elements: Array<{ tag: string }> } }
     expect(payload.card.header.template).toBe('blue')
     expect(payload.card.elements.some(element => element.tag === 'action')).toBe(false)
   })
 
   it('renders DingTalk markdown and Slack text', () => {
-    const dingtalk = renderDeliveryMessage('dingtalk', incident({ severity: 'warning' }), { sessionId: 's', reportSeq: 2, portalUrl: 'https://portal.example.test/aiops/' })
+    const dingtalk = renderDeliveryMessage('dingtalk', incident({ severity: 'warning' }), { sessionId: 's', reportRevision: 2, portalUrl: 'https://portal.example.test/aiops/' })
     const dingtalkPayload = JSON.parse(dingtalk.body) as { msgtype: string; markdown: { title: string; text: string } }
     expect(dingtalkPayload.msgtype).toBe('markdown')
     expect(dingtalkPayload.markdown.title).toBe('[AIOps][WARNING] API latency on checkout')
     expect(dingtalkPayload.markdown.text).toContain('### ⚠️')
     expect(dingtalkPayload.markdown.text).toContain('[Open AIOps Portal](https://portal.example.test/aiops/)')
 
-    const slack = renderDeliveryMessage('slack', incident({ severity: 'warning' }), { sessionId: 's', reportSeq: 2, portalUrl: 'https://portal.example.test/aiops/' })
+    const slack = renderDeliveryMessage('slack', incident({ severity: 'warning' }), { sessionId: 's', reportRevision: 2, portalUrl: 'https://portal.example.test/aiops/' })
     const slackPayload = JSON.parse(slack.body) as { text: string }
     expect(slackPayload.text).toContain('*⚠️ [AIOps][WARNING] API latency on checkout*')
     expect(slackPayload.text).toContain('<https://portal.example.test/aiops/|Open AIOps Portal>')
@@ -120,7 +133,7 @@ describe('aiops-delivery message renderers', () => {
 
   it('clamps oversized titles and hypothesis summaries', () => {
     const long = 'x'.repeat(400)
-    const message = renderDeliveryMessage('slack', incident({ title: long, hypotheses: [{ summary: long, confidence: 'confirmed', evidenceIds: [] as never[] }] }), { sessionId: 's', reportSeq: 3 })
+    const message = renderDeliveryMessage('slack', incident({ title: long, hypotheses: [{ summary: long, confidence: 'confirmed', evidenceIds: [] as never[] }] }), { sessionId: 's', reportRevision: 3 })
     const payload = JSON.parse(message.body) as { text: string }
     expect(payload.text.length).toBeLessThan(1200)
     expect(payload.text).toContain('…')
@@ -136,9 +149,9 @@ describe('aiops-delivery push decisions', () => {
   })
 
   it('delivers the first report and records a durable delivered marker', async () => {
-    const harness = composeHarness({ config: { portalBaseUrl: 'https://portal.example.test/aiops/' } })
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
+    const harness = await composeHarness({ config: { portalBaseUrl: 'https://portal.example.test/aiops/' } })
+    harness.emit(7)
+    await vi.waitFor(() => expect(harness.markerOf()?.outcome).toBe('delivered'))
     expect(harness.fetchMock).toHaveBeenCalledOnce()
     const [url, init] = harness.fetchMock.mock.calls[0] as unknown as [URL, RequestInit]
     expect(url.href).toBe(WEBHOOK_URL)
@@ -146,48 +159,52 @@ describe('aiops-delivery push decisions', () => {
     expect((init.headers as Record<string, string>)['content-type']).toBe('application/json')
     const payload = JSON.parse(String(init.body)) as { msg_type: string }
     expect(payload.msg_type).toBe('interactive')
-    const marker = deliveryMarkers(harness.session)[0]!
-    expect(marker).toMatchObject({
+    expect(harness.markerOf()).toMatchObject({
       version: 1,
+      sessionId: SESSION_ID,
       incidentId: 'incident-1',
-      reportSeq: 7,
+      reportRevision: 7,
       provider: 'feishu',
       outcome: 'delivered',
     })
-    expect(marker.deliveryId).toMatch(/^delivery-/)
-    expect(typeof marker.deliveredAt).toBe('number')
-    expect(harness.flush).toHaveBeenCalled()
+    expect(typeof harness.markerOf()?.deliveredAt).toBe('number')
   })
 
   it('gates below-threshold reports and pushes once severity escalates', async () => {
-    const harness = composeHarness({ config: { minSeverity: 'critical' } })
-    harness.listener(harness.session, 'aiopsIncident', incident({ severity: 'warning' }), 4)
+    const harness = await composeHarness({ config: { minSeverity: 'critical' } })
+    harness.emit(4, incident({ severity: 'warning' }))
     await settle()
     expect(harness.fetchMock).not.toHaveBeenCalled()
-    expect(deliveryMarkers(harness.session)).toHaveLength(0)
-    harness.listener(harness.session, 'aiopsIncident', incident(), 5)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
+    expect(harness.markerOf()).toBeUndefined()
+    harness.emit(5)
+    await vi.waitFor(() => expect(harness.markerOf()?.outcome).toBe('delivered'))
     expect(harness.fetchMock).toHaveBeenCalledOnce()
   })
 
-  it('never re-pushes after a delivered marker', async () => {
-    const harness = composeHarness()
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
-    appendPluginRecord(harness.session, 'plugin:aiops/incident-state', incident({ title: 'Updated diagnosis' }))
-    harness.listener(harness.session, 'aiopsIncident', incident({ title: 'Updated diagnosis' }), 8)
+  it('never re-pushes after a delivered marker, even across a restart', async () => {
+    const domain = fakeStorageDomain()
+    const first = await composeHarness({ sharedDomain: domain })
+    first.emit(7)
+    await vi.waitFor(() => expect(first.markerOf()?.outcome).toBe('delivered'))
+    first.emit(8, incident({ title: 'Updated diagnosis' }))
     await settle()
-    expect(harness.fetchMock).toHaveBeenCalledOnce()
-    expect(deliveryMarkers(harness.session)).toHaveLength(1)
+    expect(first.fetchMock).toHaveBeenCalledOnce()
+
+    // A restarted subscriber reads the same durable marker and stays silent.
+    const second = await composeHarness({ sharedDomain: domain })
+    second.emit(9, incident({ title: 'Updated diagnosis' }))
+    await settle()
+    expect(second.fetchMock).not.toHaveBeenCalled()
+    expect(second.domain.records.size).toBe(1)
   })
 
   it('records one failed marker after exhausting the attempt burst', async () => {
     const fetchImpl = vi.fn(async () => new Response('unavailable', { status: 503 }))
-    const harness = composeHarness({ config: { maxAttempts: 3, retryBackoffMs: 1 }, fetchImpl })
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
+    const harness = await composeHarness({ config: { maxAttempts: 3, retryBackoffMs: 1 }, fetchImpl })
+    harness.emit(7)
+    await vi.waitFor(() => expect(harness.markerOf()?.outcome).toBe('failed'))
     expect(fetchImpl).toHaveBeenCalledTimes(3)
-    expect(deliveryMarkers(harness.session)[0]).toMatchObject({
+    expect(harness.markerOf()).toMatchObject({
       outcome: 'failed',
       reason: expect.stringContaining('http_error'),
     })
@@ -195,95 +212,96 @@ describe('aiops-delivery push decisions', () => {
   })
 
   it('treats provider rejections as failures', async () => {
-    const feishu = composeHarness({
+    const feishu = await composeHarness({
       config: { retryBackoffMs: 1 },
       fetchImpl: vi.fn(async () => new Response(JSON.stringify({ code: 9_999_999, msg: 'invalid token' }), { status: 200 })),
     })
-    feishu.listener(feishu.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(feishu.session).length).toBe(1))
-    expect(deliveryMarkers(feishu.session)[0]?.reason).toContain('provider_error')
+    feishu.emit(7)
+    await vi.waitFor(() => expect(feishu.markerOf()?.outcome).toBe('failed'))
+    expect(feishu.markerOf()?.reason).toContain('provider_error')
 
-    const dingtalk = composeHarness({
+    const dingtalk = await composeHarness({
       config: { provider: 'dingtalk' as const, retryBackoffMs: 1 },
       fetchImpl: vi.fn(async () => new Response(JSON.stringify({ errcode: 0 }), { status: 200 })),
     })
-    dingtalk.listener(dingtalk.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(dingtalk.session).length).toBe(1))
-    expect(deliveryMarkers(dingtalk.session)[0]).toMatchObject({ outcome: 'delivered', provider: 'dingtalk' })
+    dingtalk.emit(7)
+    await vi.waitFor(() => expect(dingtalk.markerOf()?.outcome).toBe('delivered'))
+    expect(dingtalk.markerOf()).toMatchObject({ outcome: 'delivered', provider: 'dingtalk' })
 
-    const slack = composeHarness({
+    const slack = await composeHarness({
       config: { provider: 'slack' as const, retryBackoffMs: 1 },
       fetchImpl: vi.fn(async () => new Response('not ok', { status: 200 })),
     })
-    slack.listener(slack.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(slack.session).length).toBe(1))
-    expect(deliveryMarkers(slack.session)[0]?.reason).toContain('provider_error')
+    slack.emit(7)
+    await vi.waitFor(() => expect(slack.markerOf()?.outcome).toBe('failed'))
+    expect(slack.markerOf()?.reason).toContain('provider_error')
   })
 
   it('accepts a Slack ok body as delivered', async () => {
-    const harness = composeHarness({
+    const harness = await composeHarness({
       config: { provider: 'slack' as const },
       fetchImpl: vi.fn(async () => new Response('ok', { status: 200 })),
     })
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
-    expect(deliveryMarkers(harness.session)[0]).toMatchObject({ outcome: 'delivered', provider: 'slack' })
+    harness.emit(7)
+    await vi.waitFor(() => expect(harness.markerOf()?.outcome).toBe('delivered'))
+    expect(harness.markerOf()).toMatchObject({ outcome: 'delivered', provider: 'slack' })
   })
 
   it('records a timeout failure for a hanging webhook', async () => {
     const hangingFetch = vi.fn((_url: URL, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true })
     })) as unknown as typeof globalThis.fetch
-    const harness = composeHarness({ config: { timeoutMs: 50, maxAttempts: 1, retryBackoffMs: 1 }, fetchImpl: hangingFetch })
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
-    expect(deliveryMarkers(harness.session)[0]?.reason).toContain('timeout')
+    const harness = await composeHarness({ config: { timeoutMs: 50, maxAttempts: 1, retryBackoffMs: 1 }, fetchImpl: hangingFetch })
+    harness.emit(7)
+    await vi.waitFor(() => expect(harness.markerOf()?.outcome).toBe('failed'))
+    expect(harness.markerOf()?.reason).toContain('timeout')
   })
 
   it('skips silently when the webhook URL is missing or invalid', async () => {
-    const missing = composeHarness({ credential: null })
-    missing.listener(missing.session, 'aiopsIncident', incident(), 7)
+    const missing = await composeHarness({ credential: null })
+    missing.emit(7)
     await settle()
     expect(missing.fetchMock).not.toHaveBeenCalled()
-    expect(deliveryMarkers(missing.session)).toHaveLength(0)
+    expect(missing.markerOf()).toBeUndefined()
     expect(missing.logger.warn).toHaveBeenCalled()
 
-    const plainHttp = composeHarness({ credential: 'http://im-hook.test/token' })
-    plainHttp.listener(plainHttp.session, 'aiopsIncident', incident(), 7)
+    const plainHttp = await composeHarness({ credential: 'http://im-hook.test/token' })
+    plainHttp.emit(7)
     await settle()
     expect(plainHttp.fetchMock).not.toHaveBeenCalled()
 
-    const embedded = composeHarness({ credential: 'https://user:pass@im-hook.test/token' })
-    embedded.listener(embedded.session, 'aiopsIncident', incident(), 7)
+    const embedded = await composeHarness({ credential: 'https://user:pass@im-hook.test/token' })
+    embedded.emit(7)
     await settle()
     expect(embedded.fetchMock).not.toHaveBeenCalled()
 
-    const unconfigured = composeHarness({ config: { webhookUrlEnv: '' } })
-    unconfigured.listener(unconfigured.session, 'aiopsIncident', incident(), 7)
+    const unconfigured = await composeHarness({ config: { webhookUrlEnv: '' } })
+    unconfigured.emit(7)
     await settle()
     expect(unconfigured.resolve).not.toHaveBeenCalled()
     expect(unconfigured.fetchMock).not.toHaveBeenCalled()
   })
 
   it('resolves the webhook URL through the credential reference', async () => {
-    const harness = composeHarness()
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
-    await vi.waitFor(() => expect(deliveryMarkers(harness.session).length).toBe(1))
+    const harness = await composeHarness()
+    harness.emit(7)
+    await vi.waitFor(() => expect(harness.markerOf()?.outcome).toBe('delivered'))
     expect(harness.resolve).toHaveBeenCalledWith(expect.objectContaining({}))
   })
 
-  it('logs a persistence failure without throwing', async () => {
-    const harness = composeHarness({ flushOk: false })
-    harness.listener(harness.session, 'aiopsIncident', incident(), 7)
+  it('logs a marker persistence failure without throwing', async () => {
+    const harness = await composeHarness({ failMarkerPuts: true })
+    harness.emit(7)
     await vi.waitFor(() => expect(harness.logger.error).toHaveBeenCalled())
-    expect(deliveryMarkers(harness.session)).toHaveLength(0)
+    expect(harness.markerOf()).toBeUndefined()
+    expect(harness.fetchMock).toHaveBeenCalledOnce()
   })
 
-  it('rejects invalid portal and numeric configuration at load', () => {
-    expect(() => composeHarness({ config: { portalBaseUrl: 'ftp://portal.example.test' } })).toThrow()
-    expect(() => composeHarness({ config: { portalBaseUrl: 'https://u:p@portal.example.test' } })).toThrow()
-    expect(() => composeHarness({ config: { maxAttempts: 0 } })).toThrow()
-    expect(() => composeHarness({ config: { timeoutMs: 0 } })).toThrow()
-    expect(() => composeHarness({ config: { webhookUrlEnv: 'not a name!' } })).toThrow()
+  it('rejects invalid portal and numeric configuration at load', async () => {
+    await expect(composeHarness({ config: { portalBaseUrl: 'ftp://portal.example.test' } })).rejects.toThrow()
+    await expect(composeHarness({ config: { portalBaseUrl: 'https://u:p@portal.example.test' } })).rejects.toThrow()
+    await expect(composeHarness({ config: { maxAttempts: 0 } })).rejects.toThrow()
+    await expect(composeHarness({ config: { timeoutMs: 0 } })).rejects.toThrow()
+    await expect(composeHarness({ config: { webhookUrlEnv: 'not a name!' } })).rejects.toThrow()
   })
 })

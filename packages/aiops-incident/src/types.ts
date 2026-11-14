@@ -64,10 +64,10 @@ export interface AiopsOperatorFeedback {
   readonly version: 1
   /** Deterministic from the owning Session and tool call, so retries are idempotent. */
   readonly feedbackId: AiopsFeedbackId
-  /** Incident identity copied from the current projection. */
+  /** Incident identity copied from the reviewed report. */
   readonly incidentId: AiopsIncidentId
-  /** Sequence of the incident-state event the operator reviewed. */
-  readonly reportSeq: number
+  /** Revision of the incident report the operator reviewed. */
+  readonly reportRevision: number
   /** Operator assessment; this never mutates the report being reviewed. */
   readonly verdict: 'confirmed' | 'corrected' | 'rejected'
   /** Concise reason or review note supplied by the operator. */
@@ -77,30 +77,28 @@ export interface AiopsOperatorFeedback {
   readonly origin: 'operator-via-agent'
 }
 
-/**
- * DSH 0.2.x carries plugin-owned durable state as ignorable plugin records
- * under the `plugin:` grammar instead of released `SessionEventMap` types, so
- * an unknown older or newer reader retains and skips them instead of refusing
- * the whole log.
- */
-declare module '@deepseek-ai/dsh-session/types' {
-  interface PluginRecordMap {
-    /** Complete post-write AIOps incident state; latest valid record wins on replay. */
-    'plugin:aiops/incident-state': AiopsIncidentState
-    /** Append-only operator review of one exact incident-state record. */
-    'plugin:aiops/operator-feedback': AiopsOperatorFeedback
-  }
+/** One persisted incident report plus its storage-domain envelope. */
+export interface AiopsIncidentRecord {
+  /** Owning diagnostic Session; one Session carries at most one incident. */
+  readonly sessionId: string
+  /** Workspace (Session cwd) the diagnostic round ran in. */
+  readonly workspace: string
+  /** Monotonic report revision; 1 on the first report, bumped per replacement. */
+  readonly revision: number
+  /** Wall-clock milliseconds of the durable write. */
+  readonly updatedAt: number
+  /** Complete current incident state. */
+  readonly incident: AiopsIncidentState
 }
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
-  interface SessionProjectionStateMap {
-    aiopsIncident: AiopsIncidentState | null
-    aiopsIncidentFeedback: AiopsOperatorFeedback | null
-  }
-  interface SessionProjectionMap {
-    /** Current incident, or null before the first structured report. */
-    aiopsIncident: AiopsIncidentState | null
-    /** Latest operator review in this incident Session, or null. */
-    aiopsIncidentFeedback: AiopsOperatorFeedback | null
-  }
+/** One persisted operator feedback plus its storage-domain envelope. */
+export interface AiopsFeedbackRecord {
+  /** Owning diagnostic Session. */
+  readonly sessionId: string
+  /** Stable identity of the feedback tool call. */
+  readonly feedbackId: AiopsFeedbackId
+  /** Wall-clock milliseconds of the durable write. */
+  readonly time: number
+  /** The reviewed feedback value. */
+  readonly feedback: AiopsOperatorFeedback
 }

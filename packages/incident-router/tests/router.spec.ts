@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { Agent, CreateAgentOptions, ResumeAgentOptions } from '@deepseek-ai/dsh-agent'
 import type { AiopsEvidenceId, AiopsIncidentId, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
 import { brandString } from '@deepseek-ai/dsh-brand'
-import { Session, SessionId, appendPluginRecord, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { Session, SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   WebhookDeliveryId,
   WebhookSourceId,
@@ -210,6 +210,25 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     setRouterGauges: vi.fn(),
     observeDiagnosticLatency: vi.fn(),
   } as never)
+  // In-memory stand-in for the plugin-owned incident store: the router reads
+  // persisted reports from it and appends lifecycle closures through it.
+  const incidentRecords = new Map<string, { sessionId: string; workspace: string; revision: number; updatedAt: number; incident: AiopsIncidentState }>()
+  ctx.provide('aiopsIncidents', {
+    get: (id: string) => incidentRecords.get(id),
+    report: (id: string, workspace: string, incident: AiopsIncidentState) => {
+      const previous = incidentRecords.get(id)
+      const record = previous === undefined
+        ? { sessionId: id, workspace, revision: 1, updatedAt: 5, incident }
+        : { sessionId: id, workspace: previous.workspace, revision: previous.revision + 1, updatedAt: 5, incident }
+      incidentRecords.set(id, record)
+      return Promise.resolve(record)
+    },
+    listResolved: (workspace?: string, limit?: number) => [...incidentRecords.values()]
+      .filter(record => record.incident.status === 'resolved')
+      .filter(record => workspace === undefined || record.workspace === workspace)
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, limit ?? Number.MAX_SAFE_INTEGER),
+  } as never)
   const router = new AiopsIncidentRouter(ctx, options.config ?? config)
   return {
     ctx,
@@ -222,6 +241,10 @@ function harness(options: { persisted?: boolean; manualIdle?: boolean; config?: 
     resume,
     attach,
     router,
+    incidentRecords,
+    seedIncident: (id: string, incident: AiopsIncidentState, workspace = '/workspace') => {
+      incidentRecords.set(id, { sessionId: id, workspace, revision: 1, updatedAt: 5, incident })
+    },
   }
 }
 
@@ -360,21 +383,21 @@ describe('AIOps incident router', () => {
     await vi.waitFor(() => expect(agent.followups).toHaveLength(2))
     expect(JSON.stringify(agent.followups[1])).toContain('the router appends the deterministic resolved transition')
     // The model persists an active report while the recovery turn runs.
-    appendPluginRecord(agent.session, 'plugin:aiops/incident-state', report())
+    test.seedIncident(String(agent.id), report())
     agent.settle()
     await vi.waitFor(() => {
-      const records = agent.events.filter(event => event.type === 'plugin:aiops/incident-state')
-      expect(records).toHaveLength(2)
-      const latest = records.at(-1)?.data as AiopsIncidentState
-      expect(latest.status).toBe('resolved')
-      expect(latest.incidentId).toBe('inc-link-1')
-      expect(latest.evidence.at(-1)?.id).toMatch(/^alert-recovery-/)
-      expect(latest.evidence.at(-1)?.kind).toBe('alert')
-      expect(latest.evidence.at(-1)?.summary).toContain('KubePodCrashLooping')
-      expect(latest.evidence.at(-1)?.summary).toContain('resolved at')
+      const record = test.incidentRecords.get(String(agent.id))
+      expect(record?.revision).toBe(2)
+      const latest = record?.incident
+      expect(latest?.status).toBe('resolved')
+      expect(latest?.incidentId).toBe('inc-link-1')
+      expect(latest?.evidence.at(-1)?.id).toMatch(/^alert-recovery-/)
+      expect(latest?.evidence.at(-1)?.kind).toBe('alert')
+      expect(latest?.evidence.at(-1)?.summary).toContain('KubePodCrashLooping')
+      expect(latest?.evidence.at(-1)?.summary).toContain('resolved at')
       // The carried-forward report keeps the model's own evidence untouched.
-      expect(latest.evidence[0]?.id).toBe('metric-latency-1')
-      expect(latest.hypotheses).toHaveLength(1)
+      expect(latest?.evidence[0]?.id).toBe('metric-latency-1')
+      expect(latest?.hypotheses).toHaveLength(1)
     })
   })
 
@@ -383,12 +406,12 @@ describe('AIOps incident router', () => {
     await test.rule().run(delivery('firing-only'), new AbortController().signal)
     const agent = [...test.agents.values()][0]
     if (agent === undefined) throw new Error('missing agent')
-    appendPluginRecord(agent.session, 'plugin:aiops/incident-state', report())
+    test.seedIncident(String(agent.id), report())
     agent.settle()
     await new Promise(resolve => setTimeout(resolve, 0))
-    const records = agent.events.filter(event => event.type === 'plugin:aiops/incident-state')
-    expect(records).toHaveLength(1)
-    expect((records[0]?.data as AiopsIncidentState).status).toBe('investigating')
+    const record = test.incidentRecords.get(String(agent.id))
+    expect(record?.revision).toBe(1)
+    expect(record?.incident.status).toBe('investigating')
   })
 
   it('leaves an already-resolved incident untouched after recovery', async () => {
@@ -400,10 +423,12 @@ describe('AIOps incident router', () => {
     await test.rule().run(delivery('already-recovery', 'resolved'), signal)
     agent.settle()
     await vi.waitFor(() => expect(agent.followups).toHaveLength(2))
-    appendPluginRecord(agent.session, 'plugin:aiops/incident-state', report('resolved'))
+    test.seedIncident(String(agent.id), report('resolved'))
     agent.settle()
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(agent.events.filter(event => event.type === 'plugin:aiops/incident-state')).toHaveLength(1)
+    const record = test.incidentRecords.get(String(agent.id))
+    expect(record?.revision).toBe(1)
+    expect(record?.incident.status).toBe('resolved')
   })
 
   it('skips closure without a persisted report and still releases the fingerprint', async () => {
@@ -417,7 +442,7 @@ describe('AIOps incident router', () => {
     await vi.waitFor(() => expect(agent.followups).toHaveLength(2))
     agent.settle()
     await new Promise(resolve => setTimeout(resolve, 0))
-    expect(agent.events.filter(event => event.type === 'plugin:aiops/incident-state')).toHaveLength(0)
+    expect(test.incidentRecords.size).toBe(0)
     // The released fingerprint slot lets the next firing alert open a new round.
     await test.rule().run(delivery('next-firing'), signal)
     await vi.waitFor(() => expect(test.create).toHaveBeenCalledTimes(2))
@@ -425,21 +450,13 @@ describe('AIOps incident router', () => {
 
   it('resolves history reuse defaults and attaches matching resolved priors as leads only', async () => {
     const [resolved] = z.resolve(config, RouterConfig)
-    expect(resolved.history).toEqual({ maxScanSessions: 200, maxIncidents: 3 })
+    expect(resolved.history).toEqual({ maxScanRecords: 200, maxIncidents: 3 })
 
+    const test = harness()
     const priorSession = (id: string, incident: AiopsIncidentState) => {
-      const session = Session.create(SessionId(id), undefined, {
-        version: 4,
-        id: SessionId(id),
-        cwd: '/workspace',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        isSeeded: false,
-      })
-      appendPluginRecord(session, 'plugin:aiops/incident-state', incident)
-      return session
+      test.seedIncident(id, incident)
     }
-    const matching = priorSession('prior-match', {
+    priorSession('prior-match', {
       ...report('resolved'),
       title: 'CrashLooping on the checkout pod',
       evidence: [{
@@ -454,7 +471,7 @@ describe('AIOps incident router', () => {
       }],
       recommendations: [{ action: 'Pin the previous image digest', risk: 'low' }],
     })
-    const unrelated = priorSession('prior-other', {
+    priorSession('prior-other', {
       ...report('resolved'),
       evidence: [{
         id: brandString<AiopsEvidenceId>('alert-fingerprint-2'),
@@ -467,7 +484,7 @@ describe('AIOps incident router', () => {
         evidenceIds: [brandString<AiopsEvidenceId>('alert-fingerprint-2')],
       }],
     })
-    const stillOpen = priorSession('prior-open', {
+    priorSession('prior-open', {
       ...report('investigating'),
       evidence: [{
         id: brandString<AiopsEvidenceId>('alert-fingerprint-3'),
@@ -476,30 +493,6 @@ describe('AIOps incident router', () => {
       }],
       hypotheses: [],
     })
-    const sessions = [matching, unrelated, stillOpen]
-    const test = harness()
-    test.ctx.provide('sessionQuery', {
-      filterSessions: async () => sessions.map(session => ({
-        header: session.header,
-        live: false,
-        persisted: true,
-      })),
-      listEvents: async (id: ReturnType<typeof SessionId>) => {
-        const session = sessions.find(item => item.header.id === id)
-        return session === undefined ? [] : session.ownEvents().map(event => ({
-          sessionId: id,
-          seq: event.seq,
-          type: event.type,
-          time: event.time,
-        }))
-      },
-      readEvent: async (request: { sessionId: ReturnType<typeof SessionId>; seq: number }) => {
-        const session = sessions.find(item => item.header.id === request.sessionId)
-        const target = session?.ownEvents().find(event => event.seq === request.seq)
-        if (target === undefined) throw new Error(`fake query missing ${String(request.sessionId)}:${String(request.seq)}`)
-        return { session: session?.header, target }
-      },
-    } as never)
     const signal = new AbortController().signal
     await test.rule().run(delivery('reuse-firing'), signal)
     const agent = [...test.agents.values()][0]

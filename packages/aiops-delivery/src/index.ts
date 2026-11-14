@@ -3,21 +3,18 @@
  * @module @deepseek-ai/dsh-aiops-delivery
  */
 
-import { createHash } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
-import { brandString } from '@deepseek-ai/dsh-brand'
 import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import type { AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
-import { appendPluginRecord, pluginRecordOf } from '@deepseek-ai/dsh-session'
-import type { Session, SessionId } from '@deepseek-ai/dsh-session'
-import type {} from '@deepseek-ai/dsh-session-projection'
-import type {} from '@deepseek-ai/dsh-session-query'
+import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
+import type { Domain, DomainSpec, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS, deadline, timeoutOf } from '@deepseek-ai/dsh-timeout'
 import z from '@deepseek-ai/schemastery'
+import { z as zod } from 'zod'
 import { clampText, renderDeliveryMessage } from './templates.ts'
 import type { DeliveryMessage } from './templates.ts'
-import type { AiopsDeliveryId, AiopsDeliveryProvider, AiopsDeliveryRecord } from './types.ts'
+import type { AiopsDeliveryProvider, AiopsDeliveryRecord } from './types.ts'
 
 export type * from './types.ts'
 export {
@@ -34,9 +31,43 @@ export type { DeliveryMeta, DeliveryMessage } from './templates.ts'
 export const name = 'aiops-delivery'
 
 /** Services required to observe incident changes and persist audit markers. */
-export const inject = ['credentials', 'sessionProjections', 'sessionQuery', 'sessions']
+export const inject = ['aiopsIncidents', 'credentials', 'storageDomain']
 
-const DELIVERY_RECORD_TYPE = 'plugin:aiops/delivery'
+/** Storage-domain record schema for the `markers` table. */
+const markerRecordSchema = zod.object({
+  version: zod.literal(1),
+  sessionId: zod.string().min(1).max(256),
+  incidentId: zod.string().min(1).max(128),
+  reportRevision: zod.number().int().positive().safe(),
+  provider: zod.enum(['feishu', 'dingtalk', 'slack']),
+  outcome: zod.enum(['delivered', 'failed']),
+  reason: zod.string().max(400).optional(),
+  deliveredAt: zod.number().int().nonnegative().safe(),
+}).strict()
+
+/**
+ * One `aiops_delivery` domain: the latest terminal push decision per Session.
+ * A `delivered` marker suppresses every later attempt for that Session; a
+ * `failed` marker is replaced by the next attempt burst.
+ */
+export const aiopsDeliveryDomainSpec = defineDomain({
+  name: 'aiops_delivery',
+  version: 1,
+  layout: 'per-record',
+  invalidRecords: 'backup-and-skip',
+  tables: {
+    markers: domainTable<string, zod.infer<typeof markerRecordSchema>>(markerRecordSchema),
+  },
+})
+
+/** The marker store's public surface; in-memory fakes implement the same shape. */
+export interface AiopsMarkerStoreApi {
+  /** Latest terminal decision for one Session, or undefined when never attempted. */
+  get(sessionId: string): AiopsDeliveryRecord | undefined
+  /** Persist one terminal decision durably. */
+  put(record: AiopsDeliveryRecord): Promise<void>
+}
+
 const TIMEOUT_CODE = 'AIOPS_DELIVERY_TIMEOUT'
 const SEVERITY_RANK = { info: 0, warning: 1, critical: 2 } as const
 const MAX_REASON_CHARS = 200
@@ -161,13 +192,17 @@ function resolveConfig(config: Config): ResolvedConfig {
 
 /** One pending or coalesced push decision. */
 interface Work {
-  readonly session: Session
+  readonly sessionId: string
   readonly incident: AiopsIncidentState
-  readonly reportSeq: number
+  readonly reportRevision: number
 }
 
 /** Register the incident change subscription that drives IM delivery. */
-export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis.fetch = globalThis.fetch): void {
+export async function apply(
+  ctx: Context,
+  config: Config,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<void> {
   const settings = resolveConfig(config)
   let disposed = false
   const lifetime = new AbortController()
@@ -175,9 +210,29 @@ export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis
   const delivered = new Set<string>()
   const warned = new Set<string>()
 
-  ctx.effect(() => ctx.sessionProjections.onChanged((session, key, value, seq) => {
-    if (disposed || key !== 'aiopsIncident' || value === null || value === undefined) return
-    schedule({ session, incident: value as AiopsIncidentState, reportSeq: Number(seq) })
+  const domain: Domain<DomainSpec> = await ctx.storageDomain.open(aiopsDeliveryDomainSpec)
+  ctx.effect(() => () => void domain.close(), 'aiops-delivery: domainClose')
+  const markers: AiopsMarkerStoreApi = {
+    get: sessionId => {
+      const record = (domain.table('markers') as KvTable<string, zod.infer<typeof markerRecordSchema>>).get(sessionId)
+      if (record === undefined) return undefined
+      const { reason, ...rest } = record
+      // Stored plain-string identity is re-branded for the public record type.
+      return {
+        ...rest,
+        incidentId: record.incidentId as AiopsDeliveryRecord['incidentId'],
+        ...(reason === undefined ? {} : { reason }),
+      }
+    },
+    put: async record => {
+      await (domain.table('markers') as KvTable<string, zod.infer<typeof markerRecordSchema>>)
+        .put(record.sessionId, markerRecordSchema.parse(record))
+    },
+  }
+
+  ctx.effect(() => ctx.aiopsIncidents.onChanged(record => {
+    if (disposed) return
+    schedule({ sessionId: record.sessionId, incident: record.incident, reportRevision: record.revision })
   }), 'aiops-delivery: subscribe')
 
   ctx.effect(() => () => {
@@ -189,7 +244,7 @@ export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis
   }, 'aiops-delivery: dispose')
 
   function schedule(work: Work): void {
-    const key = String(work.session.id)
+    const key = work.sessionId
     const pending = inFlight.get(key)
     if (pending !== undefined) {
       pending.dirty = true
@@ -207,10 +262,10 @@ export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis
   }
 
   async function evaluate(work: Work): Promise<void> {
-    const sessionId = String(work.session.id)
+    const sessionId = work.sessionId
     if (disposed || delivered.has(sessionId)) return
     if (SEVERITY_RANK[work.incident.severity] < SEVERITY_RANK[settings.minSeverity]) return
-    if (await hasDeliveredMarker(work.session.id)) {
+    if (markers.get(sessionId)?.outcome === 'delivered') {
       delivered.add(sessionId)
       return
     }
@@ -219,7 +274,7 @@ export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis
     const portalUrl = settings.portalBaseUrl?.href
     const message = renderDeliveryMessage(settings.provider, work.incident, {
       sessionId,
-      reportSeq: work.reportSeq,
+      reportRevision: work.reportRevision,
       ...(portalUrl === undefined ? {} : { portalUrl }),
     })
     const failure = await deliver(url, message)
@@ -231,20 +286,6 @@ export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis
     }
     ctx.logger.error(`aiops-delivery: ${failure.message}`)
     await appendMarker(work, failure)
-  }
-
-  async function hasDeliveredMarker(sessionId: SessionId): Promise<boolean> {
-    const events = await ctx.sessionQuery.listEvents(sessionId)
-    for (const hit of events) {
-      if (hit.type !== (DELIVERY_RECORD_TYPE as typeof hit.type)) continue
-      const window = await ctx.sessionQuery.readEvent({ sessionId, seq: hit.seq })
-      const record = pluginRecordOf(window.target)
-      if (record !== undefined && record.type === DELIVERY_RECORD_TYPE
-        && (record.data as AiopsDeliveryRecord).outcome === 'delivered') {
-        return true
-      }
-    }
-    return false
   }
 
   async function resolveWebhookUrl(sessionId: string): Promise<URL | undefined> {
@@ -357,25 +398,17 @@ export function apply(ctx: Context, config: Config, fetchImpl: typeof globalThis
 
   async function appendMarker(work: Work, outcome: 'delivered' | AiopsDeliveryError): Promise<void> {
     try {
-      if (!await ctx.sessions.flush(work.session)) {
-        throw new Error('AIOps delivery persistence is uncertain; inspect the session before retrying.')
-      }
       const data: AiopsDeliveryRecord = {
         version: 1,
-        deliveryId: brandString<AiopsDeliveryId>(`delivery-${createHash('sha256')
-          .update(`${String(work.session.id)}\0${work.reportSeq}\0${settings.provider}`)
-          .digest('hex').slice(0, 32)}`),
+        sessionId: work.sessionId,
         incidentId: work.incident.incidentId,
-        reportSeq: work.reportSeq,
+        reportRevision: work.reportRevision,
         provider: settings.provider,
         outcome: outcome === 'delivered' ? 'delivered' : 'failed',
         ...(outcome === 'delivered' ? {} : { reason: clampText(`${outcome.code}: ${outcome.message}`, MAX_REASON_CHARS) }),
         deliveredAt: Date.now(),
       }
-      appendPluginRecord(work.session, 'plugin:aiops/delivery', data)
-      if (!await ctx.sessions.flush(work.session)) {
-        throw new Error('AIOps delivery persistence is uncertain; inspect the session before retrying.')
-      }
+      await markers.put(data)
     } catch (error: unknown) {
       ctx.logger.error('aiops-delivery: failed to persist the delivery marker.', error)
     }

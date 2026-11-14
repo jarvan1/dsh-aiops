@@ -2,7 +2,7 @@
 
 [English](aiops.md) | 中文
 
-DSH AIOps 子系统是 Alertmanager 驱动的只读调查、人工反馈与历史闭环，覆盖当前告警、Prometheus 指标、Kubernetes 对象与 Event、有界 Pod 日志以及持久事件记录。它添加认证 webhook 入口、带风暴控制的持久 fingerprint 路由、一个随包诊断 skill、三个可替换的观测 capability、十四个模型工具、持久路由/事件/反馈、诊断结论 IM 推送，以及 DSH Web 内的专用 Portal，且不修改 `agent-loop`。Session 日志仍是诊断真源；SQLite 分别保存路由协调/审计和可重建的跨 Session 搜索索引，RAG 仍不在本版本范围内。
+DSH AIOps 子系统是 Alertmanager 驱动的只读调查、人工反馈与历史闭环，覆盖当前告警、Prometheus 指标、Kubernetes 对象与 Event、有界 Pod 日志以及持久事件记录。它添加认证 webhook 入口、带风暴控制的持久 fingerprint 路由、一个随包诊断 skill、三个可替换的观测 capability、十四个模型工具、插件自有的持久事件/反馈/推送存储、诊断结论 IM 推送，以及 DSH Web 内的专用 Portal，且不修改 `agent-loop`。Session 日志保存诊断叙事；两个插件自有存储域（`aiops_incident`、`aiops_delivery`）保存结构化事件状态与推送决策；SQLite 保存路由协调/审计，RAG 仍不在本版本范围内。
 
 ## 运行时流程
 
@@ -23,21 +23,20 @@ kubernetes_*        -> ctx.kubernetes   -> 原生 kubeconfig 客户端 -> Kubern
                               |
                  aiops_incident_report
                               |
-                plugin:aiops/incident-state
-                              |
-       explicit operator verdict -> aiops_incident_feedback
-                              |
-                 plugin:aiops/operator-feedback
-                       /             \
-          Session persistence   aiopsIncident projection
-                    |                   \
-       disposable SQLite session-query    aiops-delivery 变更订阅
-                    |                                \
- incident history / feedback history /      有界 IM webhook POST
- routing audit                                        |
-                    |                      plugin:aiops/delivery 标记
-       同源 Portal snapshot + revision fence 设置
-                    |
+              aiops_incident 存储域
+            （每个 Session 一份持久报告）
+                  /        |            \
+   aiopsIncidents/   历史工具      aiops-delivery
+     changed 事件        |            订阅
+        |                 |                 |
+ explicit operator verdict |       有界 IM webhook POST
+   aiops_incident_feedback |                 |
+        |                 |        aiops_delivery 域标记
+ aiops_incident            |                 |
+   存储域                  |                 |
+                  \        |                /
+              同源 Portal snapshot
+                           |
  overview / detail / route audit / 路由策略 dry-run
 ```
 
@@ -53,9 +52,9 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 首次 firing 创建第 1 轮；重复 firing 与 resolved 通知追加到同一个 Session；resolved 后再次 firing 会打开新一轮。`resolved` 仅表示告警表达式恢复。每个被接受的决策和标准化告警都会在模型可见 follow-up 前追加为 `aiops/alert-routed` v2。事件把 `startsAt` 规范化为 T0，并携带一组可稳定重放的窗口，以及明确的 Prometheus range、Kubernetes Event 和 Pod 日志参数。
 
-恢复轮次结束后，Router 以确定性的方式关闭生命周期，而不依赖模型自行收尾：它读取最近持久化的 `plugin:aiops/incident-state` 记录，若事件尚未 resolved，则追加携带原状态的 `resolved` 状态，并附一条 `alert-recovery-<receivedAt>` 证据，引用告警名和恢复时间。该写入幂等——已 resolved 的事件保持不动——恢复提示词也明确告知模型不要自行关闭生命周期。若在轮次结束与该追加之间发生崩溃，事件保持 active；下一次 firing 告警会照常打开新一轮。
+恢复轮次结束后，Router 以确定性的方式关闭生命周期，而不依赖模型自行收尾：它读取该 Session 最近存储的事件记录，若事件尚未 resolved，则以携带原状态的 `resolved` 状态写入，并附一条 `alert-recovery-<receivedAt>` 证据，引用告警名和恢复时间。该写入幂等——已 resolved 的事件保持不动——恢复提示词也明确告知模型不要自行关闭生命周期。若在轮次结束与该写入之间发生崩溃，事件保持 active；下一次 firing 告警会照常打开新一轮。
 
-当 firing 告警打开新一轮（`created` 或 `reopened`）时，Router 还会进行尽力而为的诊断复用：通过共享 session-query 服务，在本工作区有界的 Session 历史中扫描（默认 200 个 Session / 3 个事件），寻找报告文本中提及该告警指纹身份 token（完整值或稳定后缀）的最新已 resolved 事件，并把其首要假设和建议作为明确非权威的线索附到首轮提示词中，供模型对照新证据确认或舍弃。查询服务缺失或读取失败时复用被静默跳过；追加轮次和恢复轮次从不触发复用；复用不产生任何写入——模型仍从全新报告开始。
+当 firing 告警打开新一轮（`created` 或 `reopened`）时，Router 还会进行尽力而为的诊断复用：在本工作区事件存储的有界已 resolved 记录中扫描（新增 `history.maxScanRecords`/`history.maxIncidents` 条目设置，默认 200/3），寻找报告文本中提及该告警指纹身份 token（完整值或稳定后缀）的最新事件，并把其首要假设和建议作为明确非权威的线索附到首轮提示词中，供模型对照新证据确认或舍弃。事件存储缺失或读取失败时复用被静默跳过；追加轮次和恢复轮次从不触发复用；复用不产生任何写入——模型仍从全新报告开始。
 
 ## Capability 角色
 
@@ -73,17 +72,17 @@ SQLite 将 `(source, fingerprint)` 映射到当前告警轮次和确定性 Sessi
 
 ## 事件状态
 
-每个 `plugin:aiops/incident-state` 事件都包含完整当前 `AiopsIncidentState`：版本、稳定事件编号、标题、严重级别、状态、完整证据、假设与建议。只有在当前用户明确确认、修正或否定诊断后，Agent 才能追加 `plugin:aiops/operator-feedback`。反馈包含确定性 ID、`incidentId`、所审核的 `reportSeq`、verdict 与说明；修正还包含 correction，且从不改写报告。两条写入路径都在追加前后执行 Session 持久化检查点。
+结构化事件状态保存在插件自有的 `aiops_incident` 存储域（`ctx.aiopsIncidents` 服务）中，而不是 Session 事件里：DSH 0.2.x 把 `session.append` 的插件记录保留给 Host 自带包，外部插件无法可移植地写入。该域在 `<DSH_HOME>/storages/aiops_incident/` 使用 per-record JSON 布局，每个 Session 一份 zod 校验文档保存最新完整 `AiopsIncidentState`（版本、稳定事件编号、标题、严重级别、状态、完整证据、假设、建议），另有只追加的反馈表。每次报告替换上一份并递增 `revision`；存储校验生命周期连续性（首份报告不能是 `resolved`；身份稳定；resolved 为终态），且 Session 的工作区在首份报告时固定。
 
-`aiopsIncident` 投影采用最后一个有效写入，并校验恢复的缓存值及重放的每个事件。不提供单独的 invariant companion，因为不存在第二个权威观测：投影解码的事件本身就是持久事实来源，而工具会在提交下一事件前检查生命周期连续性。事件状态有两个写入方：模型通过 `aiops_incident_report` 写入，incident router 在 Alertmanager 恢复轮次后通过确定性 resolved 转换写入；两者使用同一种记录类型并经过相同的生命周期校验。
+事件状态有两个写入方：模型通过 `aiops_incident_report` 写入，incident router 在 Alertmanager 恢复轮次后通过确定性 resolved 转换写入；两者使用同一存储、同一 schema 与同一生命周期校验。只有在当前用户明确确认、修正或否定诊断后，Agent 才能追加操作员反馈；反馈包含确定性 ID、`incidentId`、所审核的 `reportRevision`、verdict 与说明，按反馈 ID 幂等，且新报告会使绑定旧 revision 的反馈失效。修正还包含 correction，且从不改写报告。Session 日志保留完整诊断叙事（路由告警、观测、模型消息、工具调用）；存储域拥有历史工具、Portal、推送与复用所消费的结构化状态。
 
 ## 诊断结论推送
 
-`aiops-delivery` 订阅 `aiopsIncident` 投影变更，把符合条件的报告推送到一个 IM incoming webhook——飞书交互卡片、钉钉 markdown 或 Slack 文本。webhook URL 通过凭证引用（`webhookUrlEnv`）提供，因此从不进入 patch 或设置存储，且必须是干净的 https URL。低于 `minSeverity` 的报告先跳过，待严重级别升级后重新评估；已投递标记阻止同一事件之后的一切重复推送，而失败的投递爆发会写入带截断失败原因的 `plugin:aiops/delivery` 记录，让后续报告触发重试。推送只承担信息通知职责：每个决策只追加一条可审计记录，从不改变基础设施。
+`aiops-delivery` 订阅 `aiopsIncidents/changed` 事件，把符合条件的报告推送到一个 IM incoming webhook——飞书交互卡片、钉钉 markdown 或 Slack 文本。webhook URL 通过凭证引用（`webhookUrlEnv`）提供，因此从不进入 patch 或设置存储，且必须是干净的 https URL。低于 `minSeverity` 的报告先跳过，待严重级别升级后重新评估；`aiops_delivery` 域中的已投递标记阻止同一 Session 之后的一切重复推送——包括重启之后——而失败的投递爆发会用带截断失败原因的标记覆盖，让后续报告触发重试。推送只承担信息通知职责：每个决策只追加一条可审计记录，从不改变基础设施。
 
 ## 持久化、数据库与 RAG
 
-该子系统复用 DSH Session 持久化保存诊断真源。JSONL 存储路由告警事件、模型可见消息、工具观测、事件状态和操作员反馈；`ctx.sessionProjections` 提供当前状态。`aiops-router.sqlite` 拥有 delivery 重放、队列、风暴控制/路由策略审计和 fingerprint 到轮次的协调状态。Bundle 在 `aiops-incidents.sqlite` 启用 `dsh-session-query-sqlite`；`dsh-tool-aiops-history` 将工具读取限制在调用方工作区。Portal 不增加数据库，其接口固定读取 Router 配置的诊断工作区，并对会话、事件和审计扫描设置上限。
+该子系统保留三类持久状态。DSH Session 持久化（`~/.dsh/sessions` 下的 JSONL）保存诊断叙事：路由告警、模型可见消息与工具观测。`<DSH_HOME>/storages/` 下的插件自有存储域保存结构化状态：`aiops_incident`（事件报告与操作员反馈）和 `aiops_delivery`（终态推送决策）；两者都在持久边界做 schema 校验，无法读取的记录会被备份并跳过，而不会阻塞启动。`aiops-router.sqlite` 拥有 delivery 重放、队列、风暴控制/路由策略审计和 fingerprint 到轮次的协调状态。Bundle 在 `aiops-incidents.sqlite` 启用 `dsh-session-query-sqlite`；`dsh-tool-aiops-history` 通过事件存储将工具读取限制在调用方工作区。Portal 不增加数据库，其接口固定读取 Router 配置的诊断工作区，并对事件和审计扫描设置上限。
 
 RAG 暂缓，因为该闭环从实时运维状态进行诊断，目前还没有经过验证的运维手册语料库。只有在具备维护中的语料、访问策略、引用、时效规则与评测集后才应增加检索；检索应贡献证据或操作员指导，绝不能绕过只读工具与审批策略。
 

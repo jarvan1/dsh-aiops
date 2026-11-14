@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-本包让 agent 列出、读取和搜索其工作区内 Session 的持久 `aiops/incident-state`，列出或搜索追加式 `aiops/operator-feedback`，并读取同一 workspace router 的风暴控制审计。Session 结果都指向准确的 Session id 与事件序号，精确读取会解码权威事件而不信任索引内容。全文搜索复用可丢弃的 `ctx.sessionQuery` SQLite 索引；路由审计来自 router 的协调数据库。这些工具不会写入状态或变更基础设施。
+本包让 agent 从插件自有的 `aiops_incident` 存储列出、读取和搜索其工作区的持久事件记录，列出或搜索追加式操作员反馈，并读取同一 workspace router 的风暴控制审计。结果都指向准确的 Session id、`revision` 与 `updatedAt`，精确读取按引用的 revision 获取报告而不信任缓存索引。搜索在内存中对存储记录应用 DSH 字面文本过滤器；路由审计来自 router 的协调数据库。这些工具不会写入状态或变更基础设施。
 
 ## 目录
 
@@ -25,7 +25,7 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## 使用本包
 
-当模型需要调用方工作区内的事件历史时，在已启用的 `ctx.sessionQuery` 服务上挂载本包。
+当模型需要调用方工作区内的事件历史时，在已启用的 `ctx.aiopsIncidents` 存储上挂载本包。
 
 ### 何时选择本包
 
@@ -34,10 +34,13 @@ kind: "package-reference"
 ### 最小配置
 
 ```yaml
-- name: '@deepseek-ai/dsh-session-query-sqlite'
+- name: '@deepseek-ai/dsh-storage-json'
   config:
-    path: /absolute/path/to/aiops-incidents.sqlite
-    openAt: startup
+    root: /absolute/path/to/storages
+- name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+- name: '@deepseek-ai/dsh-aiops-incident'
 - name: '@deepseek-ai/dsh-tool-aiops-history'
 ```
 
@@ -45,7 +48,7 @@ kind: "package-reference"
 |---|---|---|
 | `defaultLimit` | `20` | 工具调用省略 `limit` 时的结果数 |
 | `maxLimit` | `100` | 可接受的最大结果数 |
-| `maxScanSessions` | `500` | 一次列表调用最多检查的工作区 Session 数 |
+| `maxScanRecords` | `500` | 一次列表调用最多检查的工作区事件记录数 |
 | `timeoutMs` | `30000` | 每次历史操作的协作式截止时间 |
 
 上表完整列出了所有可接受字段。
@@ -58,7 +61,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部机制——点击展开</summary>
 
-Consumer 从所属 Agent Session 派生调用方身份与工作区。报告和反馈列表先过滤逻辑 Session 语料库，再读取匹配的事件；搜索仅请求对应 event type；精确读取会重新读取引用的仅追加事件并校验载荷。路由审计工具只有在 router Service 存在时注册，并要求调用方 `cwd` 与 router `workspacePath` 完全相等。没有工作区的调用方只能访问自己的 Session。
+Consumer 从所属 Agent Session 派生调用方身份与工作区。列表与搜索扫描调用方工作区最新的已存事件与反馈记录（受 `maxScanRecords` 限制）并在内存中过滤；精确读取获取引用的 `(sessionId, revision)` 记录，并拒绝来自其他工作区的记录。路由审计工具只有在 router Service 存在时注册，并要求调用方 `cwd` 与 router `workspacePath` 完全相等。没有工作区的调用方只能访问自己的 Session。
 
 | 文件 | 作用 |
 |---|---|
@@ -73,10 +76,10 @@ Consumer 从所属 Agent Session 派生调用方身份与工作区。报告和�
 ## 进一步探索
 
 - [AIOps 事件状态](../aiops-incident/README.zh.md)——权威事件与写入校验。
-- [DSH Session Query](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session-query/session-query/README.zh.md)——精确读取与过滤 Service Definition。
-- [DSH SQLite Session Query](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session-query/session-query-sqlite/README.zh.md)——可丢弃的 FTS5 Provider 与重建行为。
+- [DSH Session Query](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/session-query/session-query/README.zh.md)——搜索复用的字面文本过滤器。
 - [AIOps 子系统](../../docs/aiops.zh.md)——完整调查与历史流程。
 - [事件历史决策](../../docs/decisions/2026-09-05-aiops-cross-session-incident-history.zh.md)——职责归属与未采用的替代方案。
+- [插件自有事件存储决策](../../docs/decisions/2026-11-14-aiops-plugin-owned-incident-store.zh.md)——为何读取指向存储域而非 Session 事件。
 
 -----
 
@@ -87,7 +90,7 @@ Consumer 从所属 Agent Session 派生调用方身份与工作区。报告和�
 
 #### 模型看到的内容
 
-模型会看到 `aiops_incident_list`、`aiops_incident_get`、`aiops_incident_search`、`aiops_feedback_list`；router 可用时还会看到 `aiops_routing_audit`。结果是有界 JSON：报告和反馈包含 Session id、事件序号与时间，路由结果包含 delivery、fingerprint、原因、队列深度、Token 预留与 transition 时间。
+模型会看到 `aiops_incident_list`、`aiops_incident_get`、`aiops_incident_search`、`aiops_feedback_list`；router 可用时还会看到 `aiops_routing_audit`。结果是有界 JSON：事件记录包含 Session id、revision、工作区与更新时间；反馈包含 Session id、事件 id、所审 revision、verdict 与时间；路由结果包含 delivery、fingerprint、原因、队列深度、Token 预留与 transition 时间。
 
 #### Token 影响
 
@@ -102,8 +105,8 @@ Consumer 从所属 Agent Session 派生调用方身份与工作区。报告和�
 <a id="known-limitations-and-deferred-work"></a>
 
 - **仅工作区相等**——授权比较 Session `cwd` 是否完全相等；组织、租户与角色策略需要独立的访问能力。
-- **每个 Session 一个搜索命中**——SQLite 跨 Session 搜索按 Session 分组，并返回其中匹配度最高的事件；使用精确读取查看引用的记录。
-- **有界列表扫描**——列表最多检查 `maxScanSessions` 个最新工作区 Session，且不返回续页游标。
+- **仅字面文本搜索**——搜索在内存中对有界存储记录应用 DSH 字面文本过滤器；没有 FTS 索引、排序或查询语法。
+- **有界列表扫描**——列表最多检查 `maxScanRecords` 条最新工作区事件记录，且不返回续页游标。
 - **没有指标聚合或 RAG**——工具暴露已存事件和审计，不计算准确率/抑制率，也不提供嵌入、运维手册检索或因果推断。
 
 <a id="dev-note"></a>

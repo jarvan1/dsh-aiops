@@ -1,8 +1,10 @@
 # Agent Note: AIOps 跨 Session 事件历史
 
-Status: implemented
+Status: implemented（存储来源于 2026-11-14 被取代）
 
 [English](2026-09-05-aiops-cross-session-incident-history.md) | 中文
+
+> **部分取代（2026-11-14）：** 历史工具现在直接读取插件自有的 `aiops_incident` 存储域，路径中不再使用 `ctx.sessionQuery` FTS 索引；工作区限定与引用式精确读取保留。见[把 AIOps 事件状态迁入插件自有存储域](2026-11-14-aiops-plugin-owned-incident-store.zh.md)。
 
 ## 问题
 

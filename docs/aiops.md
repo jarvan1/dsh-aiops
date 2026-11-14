@@ -2,7 +2,7 @@
 
 English | [中文](aiops.zh.md)
 
-The DSH AIOps subsystem is an Alertmanager-driven, read-only investigation, operator-feedback, and history loop over current alerts, Prometheus metrics, Kubernetes objects and Events, bounded Pod logs, and durable incident records. It adds authenticated webhook ingress, storm-controlled persistent fingerprint routing, one packaged diagnostic skill, three swappable observation capabilities, fourteen model tools, durable route/incident/feedback events, IM push of completed diagnoses, and a dedicated Portal inside DSH Web without changing `agent-loop`. Session logs remain diagnostic truth; SQLite stores routing coordination/audit and a separately rebuildable cross-Session search index, while RAG remains outside this version.
+The DSH AIOps subsystem is an Alertmanager-driven, read-only investigation, operator-feedback, and history loop over current alerts, Prometheus metrics, Kubernetes objects and Events, bounded Pod logs, and durable incident records. It adds authenticated webhook ingress, storm-controlled persistent fingerprint routing, one packaged diagnostic skill, three swappable observation capabilities, fourteen model tools, plugin-owned durable incident/feedback/delivery storage, IM push of completed diagnoses, and a dedicated Portal inside DSH Web without changing `agent-loop`. Session logs remain the diagnostic narrative; two plugin-owned storage domains (`aiops_incident`, `aiops_delivery`) hold structured incident state and delivery decisions; SQLite stores routing coordination/audit, while RAG remains outside this version.
 
 ## Runtime flow
 
@@ -23,30 +23,21 @@ kubernetes_*        -> ctx.kubernetes   -> native kubeconfig client -> Kubernete
                               |
                  aiops_incident_report
                               |
-                plugin:aiops/incident-state
-                              |
-       explicit operator verdict -> aiops_incident_feedback
-                              |
-                 plugin:aiops/operator-feedback
-                       /             \
-          Session persistence   aiopsIncident projection
-                    |                   \
-       disposable SQLite session-query    aiops-delivery change feed
-                    |                                \
- incident history / feedback history /      bounded IM webhook POST
- routing audit                                        |
-                    |                      plugin:aiops/delivery marker
-       same-origin Portal snapshot + revision-fenced settings
-                    |
- overview / detail / route audit / routing-policy dry-run
-                    |
-       disposable SQLite session-query index
-                    |
- incident history / feedback history / routing audit
-                    |
-       same-origin Portal snapshot + revision-fenced settings
-                    |
- overview / detail / route audit / routing-policy dry-run
+              aiops_incident storage domain
+                (one durable report per Session)
+                  /        |            \
+   aiopsIncidents/     history tools   aiops-delivery
+     changed event        |            subscription
+        |                 |                 |
+ explicit operator verdict |        bounded IM webhook POST
+   aiops_incident_feedback |                 |
+        |                 |         aiops_delivery domain marker
+ aiops_incident            |                 |
+   storage domain         |                 |
+                  \        |                /
+              same-origin Portal snapshot
+                           |
+      overview / detail / route audit / routing-policy dry-run
 ```
 
 Observation tools return bounded canonical JSON or exact bounded log text and never accept mutation verbs, URLs, shell strings, unrestricted kubectl arguments, or streaming modes. The agent converts relevant observations into evidence records, references those IDs from hypotheses, assigns explicit confidence, and stores proposed actions only as human-reviewable recommendations.
@@ -61,9 +52,9 @@ The versioned `aiops-routing` settings surface can change exclusions, severity n
 
 The first firing creates round 1; repeated firing and resolved notifications append to the same Session; firing after resolution opens a new round. `resolved` means only that the alert expression recovered. Every accepted decision and normalized alert is appended as `aiops/alert-routed` v2 before the model-visible follow-up. The event canonicalizes `startsAt` as T0 and contains one replay-stable window plus exact Prometheus range, Kubernetes Event, and Pod-log parameters.
 
-After a recovery turn settles, the router closes the lifecycle deterministically instead of trusting the model to do it: it reads the latest persisted `plugin:aiops/incident-state` record and, unless the incident is already resolved, appends the carried-forward state with status `resolved` plus one `alert-recovery-<receivedAt>` evidence entry citing the alert name and recovery time. The write is idempotent — an already-resolved incident is untouched — and the recovery prompt explicitly tells the model not to close the lifecycle itself. A crash between the settled turn and this append leaves the incident active; the next firing alert then opens a new round as usual.
+After a recovery turn settles, the router closes the lifecycle deterministically instead of trusting the model to do it: it reads the Session's latest stored incident record and, unless the incident is already resolved, reports the carried-forward state with status `resolved` plus one `alert-recovery-<receivedAt>` evidence entry citing the alert name and recovery time. The write is idempotent — an already-resolved incident is untouched — and the recovery prompt explicitly tells the model not to close the lifecycle itself. A crash between the settled turn and this write leaves the incident active; the next firing alert then opens a new round as usual.
 
-When a firing alert opens a new round (`created` or `reopened`), the router also performs best-effort diagnosis reuse: through the shared session-query service it scans this workspace's bounded session history (defaults 200 sessions / 3 incidents) for the latest resolved incident whose report text mentions an identity token of the alert fingerprint (full value or stable suffix), and attaches its top hypotheses and recommendations to the first-turn prompt as explicitly non-authoritative leads to confirm or discard against fresh evidence. Reuse is skipped silently when the query service is absent or a read fails, never runs for appended or recovery rounds, and adds no writes — the model still starts from a fresh report.
+When a firing alert opens a new round (`created` or `reopened`), the router also performs best-effort diagnosis reuse: it scans this workspace's bounded resolved incidents in the incident store (new `history.maxScanRecords`/`history.maxIncidents` entry settings, defaults 200/3), picks the latest whose report text mentions an identity token of the alert fingerprint (full value or stable suffix), and attaches its top hypotheses and recommendations to the first-turn prompt as explicitly non-authoritative leads to confirm or discard against fresh evidence. Reuse is skipped silently when the incident store is absent or a read fails, never runs for appended or recovery rounds, and adds no writes — the model still starts from a fresh report.
 
 ## Capability roles
 
@@ -81,17 +72,17 @@ Each capability combines its Service Definition and current Provider in one pack
 
 ## Incident state
 
-Every `plugin:aiops/incident-state` event contains the complete current `AiopsIncidentState`: version, stable incident ID, title, severity, status, complete evidence, hypotheses, and recommendations. Only after the current user explicitly confirms, corrects, or rejects a diagnosis may the Agent append `plugin:aiops/operator-feedback`. Feedback has a deterministic ID, `incidentId`, reviewed `reportSeq`, verdict, and note; corrections also carry replacement wording and never rewrite the report. Both write paths checkpoint Session persistence before and after append.
+Structured incident state lives in the plugin-owned `aiops_incident` storage domain (the `ctx.aiopsIncidents` service), not in Session events: DSH 0.2.x reserves `session.append` plugin records for Host-built packages, so an external plugin cannot portably write them. The domain uses the per-record JSON layout at `<DSH_HOME>/storages/aiops_incident/`, one zod-validated document per Session for the latest complete `AiopsIncidentState` (version, stable incident ID, title, severity, status, complete evidence, hypotheses, recommendations) plus an append-only feedback table. Every report replaces the previous one and increments `revision`; the store validates lifecycle continuity (first report cannot be `resolved`; identity is stable; resolved is terminal) and the Session's workspace is fixed at the first report.
 
-The `aiopsIncident` projection is last-valid-write-wins and validates both restored cache values and each replayed incident event. There is no separate invariant companion because there is no second authoritative observation: the projection decodes the event that is itself the durable source, while the tool checks lifecycle continuity before committing the next event. Two writers append incident state: the model through `aiops_incident_report`, and the incident router through the deterministic resolved transition after an Alertmanager recovery turn; both go through the same record type and lifecycle validation.
+Two writers report incident state: the model through `aiops_incident_report`, and the incident router through the deterministic resolved transition after an Alertmanager recovery turn; both go through the same store, schema, and lifecycle validation. Only after the current user explicitly confirms, corrects, or rejects a diagnosis may the Agent append operator feedback; feedback has a deterministic ID, `incidentId`, reviewed `reportRevision`, verdict, and note, is idempotent per feedback ID, and a replacement report invalidates feedback pinned to an older revision. Corrections carry replacement wording and never rewrite the report. The Session log keeps the full diagnostic narrative (routed alerts, observations, model messages, tool calls); the store owns the structured state that history tools, the Portal, delivery, and reuse consume.
 
 ## Diagnosis delivery
 
-`aiops-delivery` subscribes to the `aiopsIncident` change feed and pushes each qualifying report to one IM incoming webhook — Feishu interactive cards, DingTalk markdown, or Slack text. The webhook URL lives behind a credential reference (`webhookUrlEnv`) so it never enters the patch or settings store, and it must be a clean https URL. Reports below `minSeverity` are skipped until severity escalates; a delivered marker prevents any later re-push for the same incident, while a failed burst records `plugin:aiops/delivery` with the bounded failure reason so a later report retries. Delivery is informational only: it adds one auditable record per decision and never changes infrastructure.
+`aiops-delivery` subscribes to the `aiopsIncidents/changed` event and pushes each qualifying report to one IM incoming webhook — Feishu interactive cards, DingTalk markdown, or Slack text. The webhook URL lives behind a credential reference (`webhookUrlEnv`) so it never enters the patch or settings store, and it must be a clean https URL. Reports below `minSeverity` are skipped until severity escalates; a delivered marker in the `aiops_delivery` domain prevents any later re-push for the same Session — including after a restart — while a failed burst overwrites the marker with the bounded failure reason so a later report retries. Delivery is informational only: it adds one auditable record per decision and never changes infrastructure.
 
 ## Persistence, database, and RAG
 
-The subsystem reuses DSH Session persistence for diagnostic truth. JSONL stores routed alerts, model-visible messages, tool observations, incident state, and operator feedback; `ctx.sessionProjections` supplies current state. `aiops-router.sqlite` owns delivery replay, queue, storm-control and routing-policy audit, and fingerprint-to-round coordination. The bundle enables `dsh-session-query-sqlite` at `aiops-incidents.sqlite`; `dsh-tool-aiops-history` scopes tool reads to the caller workspace. The Portal adds no database: its endpoint is fixed to the router-configured diagnosis workspace and bounds all session, incident, and audit scans.
+The subsystem keeps three kinds of durable state. DSH Session persistence (JSONL under `~/.dsh/sessions`) holds the diagnostic narrative: routed alerts, model-visible messages, and tool observations. The plugin-owned storage domains under `<DSH_HOME>/storages/` hold the structured state: `aiops_incident` (incident reports and operator feedback) and `aiops_delivery` (terminal delivery decisions); both are schema-validated at the durable boundary, and an unreadable record is backed up and skipped rather than blocking startup. `aiops-router.sqlite` owns delivery replay, queue, storm-control and routing-policy audit, and fingerprint-to-round coordination. The bundle enables `dsh-session-query-sqlite` at `aiops-incidents.sqlite`; `dsh-tool-aiops-history` scopes tool reads to the caller workspace through the incident store. The Portal adds no database: its endpoint is fixed to the router-configured diagnosis workspace and bounds all incident and audit scans.
 
 RAG is deferred because the loop diagnoses from live operational state and there is no validated runbook corpus yet. Add retrieval only when a maintained corpus, access policy, citations, freshness rules, and evaluation set exist; retrieval should contribute evidence or operator guidance, never bypass read-only tool and approval policy.
 

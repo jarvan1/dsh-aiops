@@ -7,7 +7,6 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/dsh-aiops-observability'
 import {
   MAX_COLLECTION_ITEMS,
-  decodeAiopsIncidentState,
   incidentSearchText,
   validateAiopsIncidentTransition,
 } from '@deepseek-ai/dsh-aiops-incident'
@@ -20,11 +19,7 @@ import {
 } from '@deepseek-ai/dsh-client-locale'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-permission-presets'
-import { appendPluginRecord, pluginRecordOf } from '@deepseek-ai/dsh-session'
-import { SessionSeq } from '@deepseek-ai/dsh-session'
-import type { PluginRecord, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
-import type {} from '@deepseek-ai/dsh-session-query'
 import type {} from '@deepseek-ai/dsh-session-title'
 import {
   WebhookDeliveryId,
@@ -117,7 +112,7 @@ export interface Config {
   readonly diagnosisWindow: DiagnosisWindowPolicy
   /** Deployment-owned bounds for best-effort prior-diagnosis reuse reads. */
   readonly history?: {
-    readonly maxScanSessions: number
+    readonly maxScanRecords: number
     readonly maxIncidents: number
   }
 }
@@ -142,15 +137,10 @@ export interface RoutingPolicyEvaluation {
 
 const budget = z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER)
 const nonNegativeInteger = z.number().step(1).min(0).max(Number.MAX_SAFE_INTEGER)
-/** Default workspace sessions inspected by one prior-diagnosis reuse read. */
-const DEFAULT_MAX_HISTORY_SCAN_SESSIONS = 200
+/** Default stored incidents inspected by one prior-diagnosis reuse read. */
+const DEFAULT_MAX_HISTORY_SCAN_RECORDS = 200
 /** Default resolved incidents attached as reuse context to one new round. */
 const DEFAULT_MAX_HISTORY_INCIDENTS = 3
-/**
- * Incident state rides the DSH 0.2.x ignorable plugin-record grammar; the
- * shared query seam lists events by type string, not the released map.
- */
-const INCIDENT_RECORD_TYPE = 'plugin:aiops/incident-state'
 /** Shortest fingerprint suffix reused as a literal identity token. */
 const MIN_FINGERPRINT_SUFFIX = 6
 /** Clamp for one rendered prior-diagnosis context line. */
@@ -211,7 +201,7 @@ export const Config: z<Config> = z.object({
     logTailLines: budget.required(),
   }).required(),
   history: z.object({
-    maxScanSessions: budget.default(DEFAULT_MAX_HISTORY_SCAN_SESSIONS),
+    maxScanRecords: budget.default(DEFAULT_MAX_HISTORY_SCAN_RECORDS),
     maxIncidents: budget.default(DEFAULT_MAX_HISTORY_INCIDENTS),
   }),
 })
@@ -344,7 +334,7 @@ function languageInstruction(locale: string): string {
 
 /** One resolved prior diagnosis recovered from this workspace's history. */
 interface PriorIncident {
-  readonly sessionId: SessionId
+  readonly sessionId: string
   readonly closedAt: number
   readonly incident: AiopsIncidentState
 }
@@ -438,6 +428,7 @@ export class AiopsIncidentRouter extends Service {
   static inject = [
     'agents',
     'agentDefaultModel',
+    'aiopsIncidents',
     'aiopsTelemetry',
     'permissionPresets',
     'sessionPersistence',
@@ -752,52 +743,32 @@ export class AiopsIncidentRouter extends Service {
       }
       // The deterministic lifecycle closure runs after the model turn, so it
       // always observes the report the turn persisted, never a stale snapshot.
-      void this.settleResolved(agent, recovery, sessionId).finally(finish)
+      void this.settleResolved(recovery, sessionId).finally(finish)
     })
   }
 
   /**
    * Recover resolved prior diagnoses for one fingerprint from this router's
    * workspace history, newest first, as best-effort reuse context. The read
-   * requires the shared session-query service; without it (or on any query
-   * failure) reuse is silently skipped and routing proceeds unaffected.
+   * goes through the shared incident store; absent service or a failed read
+   * silently skips reuse and routing proceeds unaffected.
    */
   private async priorIncidentContext(alert: AlertmanagerAlert, signal: AbortSignal): Promise<PriorIncident[]> {
-    const query = this.ctx.get('sessionQuery') as Context['sessionQuery'] | undefined
-    if (query === undefined) return []
-    const maxScanSessions = this.config.history?.maxScanSessions ?? DEFAULT_MAX_HISTORY_SCAN_SESSIONS
+    const store = this.ctx.get('aiopsIncidents')
+    if (store === undefined) return []
+    const maxScanRecords = this.config.history?.maxScanRecords ?? DEFAULT_MAX_HISTORY_SCAN_RECORDS
     const maxIncidents = this.config.history?.maxIncidents ?? DEFAULT_MAX_HISTORY_INCIDENTS
     try {
       const tokens = fingerprintTokens(alert.fingerprint)
       if (tokens.length === 0) return []
-      const sessions = (await query.filterSessions([
-        { kind: 'cwd', values: [this.config.workspacePath] },
-      ] satisfies Parameters<Context['sessionQuery']['filterSessions']>[0], signal))
-        .filter(session => session.header.cwd === this.config.workspacePath)
-      const found = new Map<SessionId, PriorIncident>()
-      for (const session of sessions.slice(0, maxScanSessions)) {
+      const found: PriorIncident[] = []
+      for (const record of store.listResolved(this.config.workspacePath, maxScanRecords)) {
         signal.throwIfAborted()
-        const events = await query.listEvents(session.header.id)
-        let latest: { seq: number; time: number } | undefined
-        for (const event of events) {
-          if (event.type === (INCIDENT_RECORD_TYPE as typeof event.type)) latest = { seq: event.seq, time: event.time }
-        }
-        if (latest === undefined) continue
-        const window = await query.readEvent({ sessionId: session.header.id, seq: SessionSeq(latest.seq) }, signal)
-        const record = pluginRecordOf(window.target)
-        if (record?.type !== INCIDENT_RECORD_TYPE) continue
-        let incident: AiopsIncidentState
-        try {
-          incident = decodeAiopsIncidentState(record.data)
-        } catch {
-          continue
-        }
-        if (incident.status !== 'resolved') continue
-        if (!tokens.some(token => incidentSearchText(incident).includes(token))) continue
-        found.set(session.header.id, { sessionId: session.header.id, closedAt: latest.time, incident })
-        if (found.size >= maxIncidents) break
+        if (!tokens.some(token => incidentSearchText(record.incident).includes(token))) continue
+        found.push({ sessionId: record.sessionId, closedAt: record.updatedAt, incident: record.incident })
+        if (found.length >= maxIncidents) break
       }
-      return [...found.values()].sort((left, right) => right.closedAt - left.closedAt)
+      return found.sort((left, right) => right.closedAt - left.closedAt)
     } catch (error: unknown) {
       if (signal.aborted) throw error
       this.ctx.logger.warn('incident router skipped prior-diagnosis reuse:', error)
@@ -806,7 +777,7 @@ export class AiopsIncidentRouter extends Service {
   }
 
   /**
-   * Close the incident lifecycle after one recovery turn settles: append the
+   * Close the incident lifecycle after one recovery turn settles: persist the
    * carried-forward resolved state deterministically instead of trusting the
    * model to resolve on its own. Idempotent — an already-resolved incident is
    * left untouched, and a firing delivery after resolution opens a new Session
@@ -814,24 +785,13 @@ export class AiopsIncidentRouter extends Service {
    * fingerprint slot is still released.
    */
   private async settleResolved(
-    agent: Agent,
     recovery: { readonly receivedAt: number; readonly alert: AlertmanagerAlert },
     sessionId: string,
   ): Promise<void> {
     try {
-      let latest: PluginRecord | undefined
-      for (const event of agent.session.ownEvents()) {
-        const record = pluginRecordOf(event)
-        if (record?.type === 'plugin:aiops/incident-state') latest = record
-      }
-      if (latest === undefined) return
-      let current: AiopsIncidentState
-      try {
-        current = decodeAiopsIncidentState(latest.data)
-      } catch {
-        this.ctx.logger.warn(`incident router skipped lifecycle closure: latest incident record in Session ${sessionId} is invalid`)
-        return
-      }
+      const record = this.ctx.aiopsIncidents.get(sessionId)
+      if (record === undefined) return
+      const current = record.incident
       if (current.status === 'resolved') return
       const recoveredAt = new Date(recovery.receivedAt).toISOString()
       const label = recovery.alert.labels['alertname'] ?? recovery.alert.fingerprint
@@ -844,10 +804,7 @@ export class AiopsIncidentRouter extends Service {
           }]
       const next: AiopsIncidentState = { ...current, status: 'resolved', evidence }
       validateAiopsIncidentTransition(current, next)
-      appendPluginRecord(agent.session, 'plugin:aiops/incident-state', next)
-      if (!await this.ctx.sessions.flush(agent.session)) {
-        throw new Error(`incident router could not flush the resolved transition for Session ${sessionId}`)
-      }
+      await this.ctx.aiopsIncidents.report(sessionId, record.workspace, next)
     } catch (error: unknown) {
       this.ctx.logger.warn(`incident router could not close the incident lifecycle for Session ${sessionId}:`, error)
     }
@@ -979,7 +936,7 @@ export class AiopsIncidentRouter extends Service {
     }
     if (alert.status === 'resolved') {
       void agent.whenIdle().finally(() => {
-        void this.settleResolved(agent, { receivedAt: delivery.receivedAt, alert }, route.sessionId)
+        void this.settleResolved({ receivedAt: delivery.receivedAt, alert }, route.sessionId)
       })
     }
   }

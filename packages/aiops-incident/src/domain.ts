@@ -55,7 +55,7 @@ const recommendationSchema: ZodType<AiopsRecommendation> = z.object({
   risk: z.enum(['low', 'medium', 'high']),
 }).strict()
 
-const incidentSchema: ZodType<AiopsIncidentState> = z.object({
+const incidentStateSchema: ZodType<AiopsIncidentState> = z.object({
   version: z.literal(1),
   incidentId: brandedId<AiopsIncidentId>('incident id'),
   title: boundedText('incident title'),
@@ -81,17 +81,23 @@ const incidentSchema: ZodType<AiopsIncidentState> = z.object({
 })
 
 /**
- * Decode one model, durable-log, or projection-cache value into canonical incident state.
+ * Zod validator for one whole incident state; shared by the reporting-tool
+ * input boundary and the storage-domain record schema.
+ */
+export { incidentStateSchema }
+
+/**
+ * Decode one model or durable-store value into canonical incident state.
  * @param value - untrusted incident-shaped value.
  * @returns trimmed, branded, cross-reference-validated state.
  */
 export function decodeAiopsIncidentState(value: unknown): AiopsIncidentState {
-  return incidentSchema.parse(value)
+  return incidentStateSchema.parse(value)
 }
 
 /**
- * Validate identity and lifecycle continuity against the prior session state.
- * @param previous - current projected state, or null for the first report.
+ * Validate identity and lifecycle continuity against the prior stored state.
+ * @param previous - current stored state, or null for the first report.
  * @param next - candidate complete replacement state.
  */
 export function validateAiopsIncidentTransition(
@@ -109,16 +115,3 @@ export function validateAiopsIncidentTransition(
     throw new Error('A resolved incident cannot return to an active state.')
   }
 }
-
-/** Zod validator used by the session-projection cache boundary. */
-export const aiopsIncidentProjectionSchema: ZodType<AiopsIncidentState | null> = z.union([
-  z.unknown().transform((value, context): AiopsIncidentState => {
-    try {
-      return decodeAiopsIncidentState(value)
-    } catch {
-      context.addIssue({ code: 'custom', message: 'invalid AIOps incident state' })
-      return z.NEVER
-    }
-  }),
-  z.null(),
-])
