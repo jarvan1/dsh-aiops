@@ -4,7 +4,8 @@ Snapshot: 2026-11-14, after the DSH 0.2.2-rc.1 upgrade, aiops-delivery, alert-re
 
 ## Now
 
-- [ ] **带真实 agent 的完整 k3s 矩阵。** M2/M3 已用本机 k3s 分别验证读取链路与升级链路（真实 Pod/Event/日志、`not_found`、drain → 替换二进制 → 恢复）；仍需在真实 DSH + Prometheus/Alertmanager 环境跑一轮完整的 `setup → exercise → verify → cleanup`，确认告警 label 绑定与 Kubernetes 证据在完整链路中成立。
+- [ ] **带真实 agent 的完整 k3s 矩阵。** M2/M3 已用本机 k3s 验证读取与升级链路（含 agent 以 Pod 在集群内运行、真实 SA 令牌与已提交 RBAC）；仍需在真实 DSH + Prometheus/Alertmanager 环境跑一轮完整的 `setup → exercise → verify → cleanup`，确认告警 label 绑定与 Kubernetes 证据在完整链路中成立。
+- [ ] **在 k3s 内运行 DSH server。** 本机 k3s 无法直接拉取公网镜像（集群内无 registry 出口）。需要先用 `docker build` 构建 bundle 镜像并通过 `k3s ctr images import` 导入（需 root/sudo），或搭建集群可访问的本地 registry；随后即可用 Deployment + Service 验证 server 侧（含 `/readyz`、Portal、令牌签发与 agent 回连）。
 - [ ] **多副本连接归属。** 在线 socket 是进程内状态；多副本部署时读请求只在持有该连接的副本上成功。在引入共享连接路由（或固定单副本）之前，需在部署文档中写明约束。
 - [ ] **aiops-delivery real-IM smoke test.** Implementation is complete (see CHANGELOG 2026-11-08); remaining: one manual end-to-end push against a real Feishu/钉钉/Slack webhook in a disposable profile or the container image, including token rotation without restart.
 
