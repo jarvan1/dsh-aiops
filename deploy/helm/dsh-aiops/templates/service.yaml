@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dsh-aiops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsh-aiops.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "dsh-aiops.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: web
+      port: {{ .Values.service.webPort }}
+      targetPort: web
+      {{- with .Values.service.nodePorts.web }}
+      nodePort: {{ . }}
+      {{- end }}
+    - name: webhook
+      port: {{ .Values.service.webhookPort }}
+      targetPort: webhook
+      {{- with .Values.service.nodePorts.webhook }}
+      nodePort: {{ . }}
+      {{- end }}

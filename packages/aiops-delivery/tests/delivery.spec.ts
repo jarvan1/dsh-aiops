@@ -1,6 +1,6 @@
 import type { AiopsIncidentRecord, AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
 import { describe, expect, it, vi } from 'vitest'
-import { apply, renderDeliveryMessage } from '../src/index.ts'
+import { apply, renderDeliveryMessage, signedDingtalkUrl } from '../src/index.ts'
 import type { AiopsDeliveryRecord } from '../src/types.ts'
 
 const WEBHOOK_URL = 'https://im-hook.test/token'
@@ -51,6 +51,8 @@ interface HarnessOptions {
   readonly config?: Partial<Parameters<typeof apply>[1]>
   /** `null` resolves no credential; a string is the credential value. */
   readonly credential?: string | null
+  /** Value for the DingTalk signing credential; `null` resolves none. */
+  readonly signCredential?: string | null
   readonly fetchImpl?: typeof globalThis.fetch
   readonly failMarkerPuts?: boolean
   /** Reuse another harness's marker domain to model a restart. */
@@ -59,9 +61,14 @@ interface HarnessOptions {
 
 async function composeHarness(options: HarnessOptions = {}) {
   const credential = options.credential === undefined ? WEBHOOK_URL : options.credential
-  const resolve = vi.fn(async () => credential === null
-    ? undefined
-    : { value: credential } as never)
+  const signCredential = options.signCredential
+  const resolve = vi.fn(async (ref: unknown) => {
+    const name = String(ref)
+    if (name === 'AIOPS_DINGTALK_SIGN_SECRET') {
+      return signCredential === undefined || signCredential === null ? undefined : { value: signCredential } as never
+    }
+    return credential === null ? undefined : { value: credential } as never
+  })
   const fetchMock = options.fetchImpl ?? vi.fn(async () => new Response(JSON.stringify({ code: 0 }), { status: 200 }))
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
   const domain = options.sharedDomain ?? fakeStorageDomain(options.failMarkerPuts === true)
@@ -91,6 +98,61 @@ async function composeHarness(options: HarnessOptions = {}) {
 }
 
 const settle = () => new Promise(resolve => setTimeout(resolve, 40))
+
+describe('DingTalk signing', () => {
+  it('builds the timestamp and HMAC-SHA256 signature DingTalk expects', () => {
+    const signed = signedDingtalkUrl(new URL('https://oapi.dingtalk.com/robot/send?access_token=t'), 'SECtest', 1_700_000_000_000)
+    expect(signed.searchParams.get('access_token')).toBe('t')
+    expect(signed.searchParams.get('timestamp')).toBe('1700000000000')
+    expect(signed.searchParams.get('sign')).toBe('aZLLrriXgn05YbwaGR7knYsLeJADjr9NwLaNNKpxh4g=')
+  })
+
+  it('signs each DingTalk attempt when a signing secret is configured', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
+    const harness = await composeHarness({
+      config: { provider: 'dingtalk', signSecretEnv: 'AIOPS_DINGTALK_SIGN_SECRET', retryBackoffMs: 1 },
+      signCredential: 'SECtest',
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ errcode: 0 }), { status: 200 })),
+    })
+    harness.emit(1)
+    await settle()
+    expect(harness.fetchMock).toHaveBeenCalledOnce()
+    const requested = new URL(String(vi.mocked(harness.fetchMock).mock.calls[0]?.[0]))
+    expect(requested.searchParams.get('timestamp')).toBe('1700000000000')
+    expect(requested.searchParams.get('sign')).toBe('aZLLrriXgn05YbwaGR7knYsLeJADjr9NwLaNNKpxh4g=')
+    expect(harness.markerOf()?.outcome).toBe('delivered')
+  })
+
+  it('uses keyword mode without a signing secret and adds no signature', async () => {
+    const harness = await composeHarness({
+      config: { provider: 'dingtalk', retryBackoffMs: 1 },
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ errcode: 0 }), { status: 200 })),
+    })
+    harness.emit(1)
+    await settle()
+    const requested = new URL(String(vi.mocked(harness.fetchMock).mock.calls[0]?.[0]))
+    expect(requested.searchParams.has('timestamp')).toBe(false)
+    expect(requested.searchParams.has('sign')).toBe(false)
+  })
+
+  it('disables delivery when the signing secret is configured but unresolvable', async () => {
+    const harness = await composeHarness({
+      config: { provider: 'dingtalk', signSecretEnv: 'AIOPS_DINGTALK_SIGN_SECRET', retryBackoffMs: 1 },
+      signCredential: null,
+      fetchImpl: vi.fn(async () => new Response(JSON.stringify({ errcode: 0 }), { status: 200 })),
+    })
+    harness.emit(1)
+    await settle()
+    expect(harness.fetchMock).not.toHaveBeenCalled()
+    expect(harness.markerOf()).toBeUndefined()
+    expect(harness.logger.warn).toHaveBeenCalled()
+  })
+
+  it('rejects a signing secret for a non-DingTalk provider', async () => {
+    await expect(composeHarness({ config: { provider: 'feishu', signSecretEnv: 'AIOPS_DINGTALK_SIGN_SECRET' } }))
+      .rejects.toMatchObject({ code: 'invalid_request' })
+  })
+})
 
 describe('aiops-delivery message renderers', () => {
   it('renders a Feishu interactive card bounded in length', () => {

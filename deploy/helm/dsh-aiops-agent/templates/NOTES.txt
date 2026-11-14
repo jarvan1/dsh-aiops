@@ -1,0 +1,14 @@
+The AIOps agent for cluster {{ .Values.cluster.name }} is installed as release {{ .Release.Name }}.
+
+The agent dials {{ .Values.cluster.serverUrl }} outbound; the server never dials this cluster.
+Verify the Portal row turns connected and run Probe from the Clusters view.
+
+Upgrades are operator-applied:
+  1. In the Portal, use Prepare upgrade and enter the target version; the agent drains.
+  2. helm upgrade {{ .Release.Name }} <chart> -n {{ .Release.Namespace }} --set image.tag=<version>
+  3. The replacement Pod connects with the new version and reads resume.
+
+If the server logs `unexpected EOF` or the agent logs a rejected token:
+  - cluster.name must equal the name whose token was issued;
+  - cluster.serverUrl must be reachable from inside this cluster;
+  - the server must trust the Host the agent sends (DSH_TRUSTED_HOSTS).

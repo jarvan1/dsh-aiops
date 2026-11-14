@@ -21,7 +21,7 @@ kind: "package-reference"
 | Provider | 载荷 |
 |---|---|
 | `feishu` | `msg_type: interactive` 卡片，带按严重级别着色的标题、`lark_md` 字段与可选 Portal 按钮 |
-| `dingtalk` | `msgtype: markdown`，使用相同的字段行与 Portal 链接 |
+| `dingtalk` | `msgtype: markdown`，使用相同的字段行与 Portal 链接；支持下面的两种安全设置 |
 | `slack` | Incoming-webhook `{ text }` 消息，使用 mrkdwn 格式 |
 
 ## 配置
@@ -30,12 +30,22 @@ kind: "package-reference"
 |---|---|---|
 | `provider` | `feishu` | 目标 IM 家族 |
 | `webhookUrlEnv` | — | 保存 https webhook URL 的凭证引用名（环境变量）；URL 永不进入 patch 或设置存储 |
+| `signSecretEnv` | — | 仅钉钉：保存机器人加签密钥（`SEC...`）的凭证引用名；留空表示使用关键字模式 |
 | `minSeverity` | `warning` | 会被推送的最低严重级别 |
 | `portalBaseUrl` | — | 渲染为深链的 Portal 绝对基础 URL |
 | `timeoutMs` | `10000` | 单次请求截止时间 |
 | `maxAttempts` | `2` | 每份报告的投递尝试次数（1..5） |
 | `retryBackoffMs` | `2000` | 尝试之间的固定退避 |
 | `maxResponseBytes` | `65536` | 完整响应体的最大字节数 |
+
+### 钉钉安全设置
+
+钉钉自定义机器人可要求两种安全设置之一；机器人与这里必须配置同一项：
+
+- **加签** —— 在机器人安全设置中选择“加签”，把 `SEC...` 密钥存为凭据，并把 `signSecretEnv` 设为其引用名。每次尝试都会在 webhook URL 上追加新的 `timestamp` 与 HMAC-SHA256 `sign`（密钥不会出现在 URL 或日志中）。若配置了密钥但无法解析，会禁用推送，而不是发送一条会被机器人拒绝的消息。
+- **自定义关键词** —— 保持 `signSecretEnv` 为空，把关键词设为 `AIOps`。推送标题与正文都包含 `[AIOps]`，因此每条消息都能通过关键词校验。
+
+凭据按次解析，轮换任一值都无需重启。
 
 每份事件报告的投递决策顺序：已有 `delivered` 标记则跳过；报告严重级别低于 `minSeverity` 时跳过（后续升级会重新评估）；凭证缺失或 URL 不是干净的 https URL 时跳过并记录一条警告；否则执行有界重试爆发并写入终态标记。
 

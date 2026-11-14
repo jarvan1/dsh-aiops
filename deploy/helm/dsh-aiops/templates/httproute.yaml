@@ -1,0 +1,30 @@
+{{- if .Values.gatewayApi.enabled }}
+{{- if eq (len .Values.gatewayApi.parentRefs) 0 }}{{ fail "gatewayApi.parentRefs must name at least one Gateway" }}{{ end }}
+{{- $refs := .Values.gatewayApi.parentRefs }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "dsh-aiops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsh-aiops.labels" . | nindent 4 }}
+  {{- with .Values.gatewayApi.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml $refs | nindent 4 }}
+  {{- with .Values.gatewayApi.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "dsh-aiops.fullname" . }}
+          port: {{ .Values.service.webPort }}
+{{- end }}

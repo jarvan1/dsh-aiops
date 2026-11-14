@@ -1,0 +1,13 @@
+apiVersion: v2
+name: dsh-aiops-agent
+description: Outbound-only cluster agent that connects one Kubernetes cluster to a DSH AIOps server
+type: application
+version: 0.2.0-rc.1
+appVersion: "0.2.0-rc.1"
+home: https://github.com/jarvan1/dsh-aiops
+sources:
+  - https://github.com/jarvan1/dsh-aiops
+keywords:
+  - aiops
+  - kubernetes
+  - agent

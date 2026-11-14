@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dsh-aiops.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dsh-aiops.labels" . | nindent 4 }}
+    {{- with .Values.podLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "dsh-aiops.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "dsh-aiops.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dsh
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: web
+              containerPort: {{ .Values.dsh.webPort }}
+            - name: webhook
+              containerPort: {{ .Values.dsh.webhookPort }}
+          env:
+            - name: DSH_HOME
+              value: {{ .Values.dsh.home | quote }}
+            - name: AIOPS_WORKSPACE
+              value: {{ .Values.dsh.workspace | quote }}
+            {{- if .Values.dsh.publicUrl }}
+            - name: DSH_PUBLIC_URL
+              value: {{ .Values.dsh.publicUrl | quote }}
+            {{- end }}
+            - name: DSH_TRUSTED_HOSTS
+              value: {{ include "dsh-aiops.trustedHosts" . | quote }}
+            - name: AIOPS_ALERTMANAGER_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dsh-aiops.credentialsSecretName" . }}
+                  key: {{ .Values.credentials.existingSecretKey }}
+            {{- with .Values.observability.prometheusUrl }}
+            - name: PROMETHEUS_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.observability.alertmanagerUrl }}
+            - name: ALERTMANAGER_URL
+              value: {{ . | quote }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /api/aiops/readyz
+              port: web
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /api/aiops/healthz
+              port: web
+            initialDelaySeconds: 30
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.dsh.home }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "dsh-aiops.dataClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

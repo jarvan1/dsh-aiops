@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Workspace build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build the bundle and rewrite workspace imports
+        run: pnpm run build:github
+      - name: Test
+        run: pnpm exec vitest run
+      - name: Check documentation links
+        run: pnpm run docs:check
+
+  go:
+    name: Agent tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  helm:
+    name: Helm charts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint
+        run: helm lint deploy/helm/dsh-aiops deploy/helm/dsh-aiops-agent
+      - name: Render server variants
+        run: |
+          helm template dsh-aiops deploy/helm/dsh-aiops -n aiops \
+            --set credentials.webhookSecret=ci-placeholder > /dev/null
+          helm template dsh-aiops deploy/helm/dsh-aiops -n aiops \
+            --set credentials.existingSecret=dsh-aiops-credentials \
+            --set persistence.enabled=false > /dev/null
+          helm template dsh-aiops deploy/helm/dsh-aiops -n aiops \
+            --set credentials.webhookSecret=ci-placeholder \
+            --set gatewayApi.enabled=true \
+            --set 'gatewayApi.parentRefs[0].name=gateway' \
+            --set 'gatewayApi.hostnames[0]=aiops.example.com' > /dev/null
+      - name: Render agent
+        run: |
+          helm template dsh-aiops-agent deploy/helm/dsh-aiops-agent -n aiops \
+            --set cluster.name=ci \
+            --set cluster.serverUrl=ws://ci/api/aiops/agent \
+            --set token.value=dsha_ci > /dev/null

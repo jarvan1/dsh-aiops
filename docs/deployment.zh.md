@@ -79,7 +79,7 @@ Kubernetes 证据不再通过 Host 侧 kubeconfig 读取。每个集群（包括
 
 server 不持有任何集群凭据。在 Portal 中吊销集群会立即断开其在线 agent；只有从未连接过的集群才能重签令牌。零集群时 `/api/aiops/readyz` 仍为 ready，并报告 `components.clusters` 与 `configured`/`total`/`connected`。
 
-把该镜像以持久 `DSH_HOME` 运行、暴露 Portal 并在同一集群安装 agent 的 Kubernetes 示例见 [`deploy/k8s/`](../deploy/k8s/README.zh.md)，其中包含无 registry 出口的本机 k3s 镜像导入步骤。
+[`deploy/helm/`](../deploy/helm/) 中的 Helm chart 以持久 `DSH_HOME` 运行该镜像，并在每个集群安装 agent；分步说明见 [`deploy/k8s/`](../deploy/k8s/README.zh.md)。
 
 ## 容器镜像
 

@@ -147,6 +147,9 @@
       config:
         provider: feishu
         webhookUrlEnv: AIOPS_DELIVERY_WEBHOOK_URL
+        # DingTalk only: the bot's signing secret reference. Empty selects
+        # keyword security; set the keyword to AIOps when signing is off.
+        signSecretEnv: !!js process.env.AIOPS_DINGTALK_SIGN_SECRET || ''
         minSeverity: warning
         portalBaseUrl: !!js process.env.AIOPS_PORTAL_PUBLIC_URL || ''
         timeoutMs: 10000

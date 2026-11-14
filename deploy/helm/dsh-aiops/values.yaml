@@ -1,0 +1,103 @@
+# Live cluster-agent sockets are process state, so this release runs one
+# replica. Set replicaCount only after shared connection routing exists.
+replicaCount: 1
+
+image:
+  repository: dsh-aiops
+  tag: "0.2.0-rc.1"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+# The entrypoint copies a seeded DSH profile into DSH_HOME on first boot, so
+# the container runs as the image's default user.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+
+podSecurityContext: {}
+
+podAnnotations: {}
+podLabels: {}
+
+dsh:
+  home: /data
+  workspace: /data/workspace
+  webPort: 8080
+  webhookPort: 3081
+  # Public origin browsers and remote agents use. Trusted hosts are derived
+  # from it; set it whenever the server is reachable by anything other than
+  # the in-cluster Service name.
+  publicUrl: ""
+  # Extra authorities DSH accepts, for example an address used in a local
+  # test. The in-cluster Service authority is always added.
+  trustedHosts: []
+
+credentials:
+  # Recommended: create the Secret out of band and reference it here.
+  existingSecret: ""
+  existingSecretKey: webhook-secret
+  # Created when existingSecret is empty. Prefer a Secret kept outside values.
+  webhookSecret: ""
+
+observability:
+  # Optional in-cluster endpoints. They can also be overridden live in the
+  # Portal's data-source settings.
+  prometheusUrl: ""
+  alertmanagerUrl: ""
+
+persistence:
+  enabled: true
+  # existingClaim takes precedence over storageClass/size.
+  existingClaim: ""
+  storageClass: ""
+  accessModes: ["ReadWriteOnce"]
+  size: 2Gi
+  annotations: {}
+
+service:
+  type: ClusterIP
+  annotations: {}
+  webPort: 8080
+  webhookPort: 3081
+  # Optional fixed NodePorts; leave empty to let Kubernetes assign.
+  nodePorts:
+    web: ""
+    webhook: ""
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: aiops.example.com
+  path: /
+  tlsSecretName: ""
+
+# Gateway API (gateway.networking.k8s.io/v1) alternative to Ingress. TLS is
+# terminated by the parent Gateway listener, not by this chart. Enable one of
+# ingress or gatewayApi unless the deployment deliberately exposes both.
+gatewayApi:
+  enabled: false
+  annotations: {}
+  # At least one parent Gateway reference. Namespace defaults to this route's
+  # namespace when omitted; sectionName selects a listener.
+  parentRefs: []
+  # - name: gateway
+  #   namespace: gateway-system
+  #   sectionName: https
+  hostnames: []
+  # - aiops.example.com
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    memory: 2Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

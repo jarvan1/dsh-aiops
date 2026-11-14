@@ -4,6 +4,31 @@ All notable changes to DSH AIOps are documented in this file.
 
 The project follows semantic-versioning conventions. Changes that have not yet been assigned a release tag remain under **Unreleased**.
 
+## Unreleased — 2026-11-14 — DingTalk signing and CI
+
+### Added
+
+- Added DingTalk signature security to `aiops-delivery`: `signSecretEnv` names the credential holding the bot's `SEC...` signing secret, and each attempt appends a fresh `timestamp` plus HMAC-SHA256 `sign` to the webhook URL. The secret is resolved per delivery, never appears in the URL or logs, and a configured but unresolvable secret disables the push instead of sending a message DingTalk will reject. Keyword security remains supported without `signSecretEnv`; both message title and body contain `[AIOps]`, so setting the bot keyword to `AIOps` satisfies the check. The setting is exposed through the bundle patches as `AIOPS_DINGTALK_SIGN_SECRET`.
+- Added GitHub Actions: `ci.yml` builds the bundle and rewrites workspace imports, runs the workspace tests, checks documentation links, runs `go vet`/`go test -race` for the agent, and lints plus renders both Helm charts (including the existing-secret, no-persistence, and Gateway API variants). `images.yml` builds both container images on every change and publishes them to GHCR on `main` and version tags, with build cache and no push from pull requests.
+
+### Validation
+
+- The workspace suite passes with the new DingTalk tests (signed URL vector, per-attempt signature, keyword mode, unresolved-secret disable, non-DingTalk rejection); `helm lint` and `helm template` cover the new `HTTPRoute`, and the workflow YAML files parse.
+
+## Unreleased — 2026-11-14 — Helm deployment charts
+
+### Added
+
+- Added `deploy/helm/dsh-aiops`, a Helm chart for the server: image, persistent `DSH_HOME` (owned claim or existing claim), credentials via an existing Secret or a chart-created one, readiness/liveness probes, ClusterIP/NodePort service, optional Ingress, trusted-host derivation from the public URL plus the in-cluster Service authority, and optional Prometheus/Alertmanager endpoints.
+- Added `deploy/helm/dsh-aiops-agent`: the outbound agent with the read-only ClusterRole and binding, ServiceAccount, heartbeat, token via an existing Secret or a chart-created one, hardened pod/container defaults, and NOTES with the verification and upgrade order.
+- Added a Gateway API alternative to Ingress: `gatewayApi.enabled` renders a `gateway.networking.k8s.io/v1` `HTTPRoute` to the web Service, with required parent Gateway references, optional hostnames, and TLS terminated by the parent listener.
+- Rewrote [`deploy/k8s/README.md`](deploy/k8s/README.md) as environment-neutral Helm steps: install, expose with TLS, issue a token, install the agent per cluster, verify, operator-applied upgrade, backups, rotation, and removal. Removed the raw manifest and the environment-specific image-loading notes; both charts run in any Kubernetes cluster with the images available.
+
+### Validation
+
+- `helm lint` passes for both charts; `helm template` renders the server Secret/PVC/Deployment/Service and the agent ServiceAccount/ClusterRole/binding/Secret/Deployment, and an Ingress when enabled.
+- The server chart was installed into a local cluster with a dynamic `DSH_HOME` claim: the Pod became ready, `/api/aiops/readyz` returned ready with `clusters.configured: false`, and the Portal clusters API answered. The agent chart created every object and was uninstalled with the server; test releases and the namespace were removed.
+
 ## Unreleased — 2026-11-14 — Agent upgrade state machine (M3)
 
 ### Added

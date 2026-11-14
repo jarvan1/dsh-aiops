@@ -1,0 +1,64 @@
+image:
+  repository: aiops-agent
+  tag: "0.2.0-rc.1"
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+cluster:
+  # Required. Must equal the cluster name whose token was issued in the Portal.
+  name: ""
+  # Required. The server's /api/aiops/agent endpoint reachable FROM THIS
+  # CLUSTER, for example wss://aiops.example.com/api/aiops/agent.
+  serverUrl: ""
+
+token:
+  # Recommended: create the Secret from the Portal's one-time plaintext and
+  # reference it here.
+  existingSecret: ""
+  existingSecretKey: token
+  # Created only when existingSecret is empty. Prefer a Secret kept outside
+  # values so the plaintext never lands in a release history.
+  value: ""
+
+serviceAccount:
+  create: true
+  # Defaults to the release fullname.
+  name: ""
+  annotations: {}
+
+rbac:
+  create: true
+  # Defaults to "<fullname>-reader". The rules are cluster-scoped and
+  # read-only; change them only together with the agent's resource allowlist.
+  clusterRoleName: ""
+
+# Agent heartbeat interval and optional extra CLI flags.
+heartbeat: 15s
+extraArgs: []
+
+resources:
+  requests:
+    cpu: 20m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

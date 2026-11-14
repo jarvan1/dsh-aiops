@@ -1,0 +1,26 @@
+DSH AIOps is installed as release {{ .Release.Name }} in namespace {{ .Release.Namespace }}.
+
+1. Open the AIOps view:
+{{- if .Values.ingress.enabled }}
+   https://{{ .Values.ingress.host }}/
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "dsh-aiops.fullname" . }} {{ .Values.service.webPort }}:{{ .Values.service.webPort }}
+   then open http://127.0.0.1:{{ .Values.service.webPort }}/
+   Add that authority to dsh.trustedHosts when DSH rejects the Host header.
+{{- end }}
+
+2. Clusters → Create token, name it after the cluster, and copy the plaintext
+   token once. Install the agent chart in that cluster with:
+
+   kubectl -n aiops create secret generic aiops-agent-token --from-file=token=./agent-token
+   helm install aiops-agent ./deploy/helm/dsh-aiops-agent -n aiops \
+     --set cluster.name=<name> \
+     --set cluster.serverUrl={{ if .Values.dsh.publicUrl }}{{ .Values.dsh.publicUrl | replace "https://" "wss://" | replace "http://" "ws://" }}/api/aiops/agent{{ else }}ws://<service>.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.webPort }}/api/aiops/agent{{ end }} \
+     --set token.existingSecret=aiops-agent-token
+
+3. Verify readiness and the cluster row:
+   kubectl -n {{ .Release.Namespace }} rollout status deployment/{{ include "dsh-aiops.fullname" . }}
+   The Portal row turns connected and /api/aiops/readyz reports clusters.configured.
+
+Upgrades are operator-applied: use Prepare upgrade in the Portal, then roll the
+agent image (helm upgrade with a new image.tag). Back up the {{ include "dsh-aiops.dataClaimName" . }} volume with the workspace.

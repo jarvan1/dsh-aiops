@@ -52,7 +52,7 @@ This release intentionally has no Portal reveal or credential-write endpoint, so
 
 ## Diagnosis delivery
 
-`aiops-delivery` pushes completed diagnoses to one IM incoming webhook (Feishu, DingTalk, or Slack). Store the https webhook URL as the `AIOPS_DELIVERY_WEBHOOK_URL` credential-reference value in `<DSH_HOME>/.credentials.yaml` with mode `0600` or in an external secret manager — never in the patch, the settings store, or the repository. The provider (`provider`), severity gate (`minSeverity`), Portal deep link (`portalBaseUrl`), and bounded deadline/retry limits are entry settings that the Web settings UI projects; committing an edit reloads the entry. The credential value is re-resolved for every delivery, so rotating the IM webhook token needs no restart: update the reference value and send one canary incident.
+`aiops-delivery` pushes completed diagnoses to one IM incoming webhook (Feishu, DingTalk, or Slack). Store the https webhook URL as the `AIOPS_DELIVERY_WEBHOOK_URL` credential-reference value in `<DSH_HOME>/.credentials.yaml` with mode `0600` or in an external secret manager — never in the patch, the settings store, or the repository. The provider (`provider`), severity gate (`minSeverity`), Portal deep link (`portalBaseUrl`), and bounded deadline/retry limits are entry settings that the Web settings UI projects; committing an edit reloads the entry. The credential value is re-resolved for every delivery, so rotating the IM webhook token needs no restart: update the reference value and send one canary incident. For DingTalk, configure either the bot's signature security (`signSecretEnv` points at the `SEC...` secret) or its keyword security (leave `signSecretEnv` empty and set the keyword to `AIOps`, which every pushed title contains).
 
 To verify, route one canary alert and confirm the message lands in the target IM thread and the `aiops_delivery` domain holds a marker for that Session with outcome `delivered` (`<DSH_HOME>/storages/aiops_delivery/markers/<session-id>.json`).
 
@@ -103,7 +103,7 @@ To upgrade an agent, use **Prepare upgrade** in the Portal (or `POST /api/aiops/
 
 The server holds no cluster credential. Revoking a cluster in the Portal drops its live agent immediately; re-issue is available only while a cluster has never connected. `/api/aiops/readyz` stays ready with zero clusters and reports `components.clusters` plus `configured`/`total`/`connected`.
 
-A Kubernetes example that runs this image with a persistent `DSH_HOME`, exposes the Portal, and installs the cluster agent into the same cluster is in [`deploy/k8s/`](../deploy/k8s/README.md), including the image-import steps for a local k3s without registry access.
+Helm charts in [`deploy/helm/`](../deploy/helm/) run this image with a persistent `DSH_HOME` and install the cluster agent into each cluster; the step-by-step guide is [`deploy/k8s/`](../deploy/k8s/README.md).
 
 ## Container image
 

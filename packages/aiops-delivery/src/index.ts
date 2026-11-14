@@ -3,6 +3,7 @@
  * @module @deepseek-ai/dsh-aiops-delivery
  */
 
+import { createHmac } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import type { AiopsIncidentState } from '@deepseek-ai/dsh-aiops-incident'
@@ -82,6 +83,11 @@ export interface Config {
    * URL. The URL itself never enters the committed patch or settings store.
    */
   webhookUrlEnv?: string
+  /**
+   * DingTalk only: credential-reference name holding the bot's signing secret
+   * (`SEC...`). Leave empty to use DingTalk's keyword security mode instead.
+   */
+  signSecretEnv?: string
   /** Lowest severity that is pushed. Defaults to `warning`. */
   minSeverity?: 'info' | 'warning' | 'critical'
   /** Absolute Portal base URL rendered as the message deep link. */
@@ -100,6 +106,7 @@ export interface Config {
 export const Config: z<Config> = z.object({
   provider: z.union(['feishu', 'dingtalk', 'slack'] as const).default('feishu'),
   webhookUrlEnv: z.string().role('credential-ref').default(''),
+  signSecretEnv: z.string().role('credential-ref').default(''),
   minSeverity: z.union(['info', 'warning', 'critical'] as const).default('warning'),
   portalBaseUrl: z.string().default(''),
   timeoutMs: z.number().step(1).min(1).max(MAX_TIMER_DELAY_MS).default(10_000),
@@ -129,6 +136,7 @@ export class AiopsDeliveryError extends Error {
 interface ResolvedConfig {
   readonly provider: AiopsDeliveryProvider
   readonly webhookUrlEnv: string
+  readonly signSecretEnv: string
   readonly minSeverity: 'info' | 'warning' | 'critical'
   readonly portalBaseUrl: URL | undefined
   readonly timeoutMs: number
@@ -140,6 +148,7 @@ interface ResolvedConfig {
 function resolveConfig(config: Config): ResolvedConfig {
   const provider = config.provider ?? 'feishu'
   const webhookUrlEnv = config.webhookUrlEnv?.trim() ?? ''
+  const signSecretEnv = config.signSecretEnv?.trim() ?? ''
   const minSeverity = config.minSeverity ?? 'warning'
   const timeoutMs = config.timeoutMs ?? 10_000
   const maxAttempts = config.maxAttempts ?? 2
@@ -147,6 +156,12 @@ function resolveConfig(config: Config): ResolvedConfig {
   const maxResponseBytes = config.maxResponseBytes ?? 65_536
   if (webhookUrlEnv !== '' && !isCredentialRefName(webhookUrlEnv)) {
     throw new AiopsDeliveryError('invalid_request', `aiops-delivery: webhookUrlEnv "${webhookUrlEnv}" is not a valid credential-reference name.`)
+  }
+  if (signSecretEnv !== '' && !isCredentialRefName(signSecretEnv)) {
+    throw new AiopsDeliveryError('invalid_request', `aiops-delivery: signSecretEnv "${signSecretEnv}" is not a valid credential-reference name.`)
+  }
+  if (signSecretEnv !== '' && provider !== 'dingtalk') {
+    throw new AiopsDeliveryError('invalid_request', 'aiops-delivery: signSecretEnv is only supported for the dingtalk provider.')
   }
   let portalBaseUrl: URL | undefined
   const rawPortalBaseUrl = config.portalBaseUrl?.trim() ?? ''
@@ -181,6 +196,7 @@ function resolveConfig(config: Config): ResolvedConfig {
   return {
     provider,
     webhookUrlEnv,
+    signSecretEnv,
     minSeverity,
     portalBaseUrl,
     timeoutMs,
@@ -188,6 +204,29 @@ function resolveConfig(config: Config): ResolvedConfig {
     retryBackoffMs,
     maxResponseBytes,
   }
+}
+
+/**
+ * DingTalk security mode for one delivery: no signature (keyword mode), the
+ * signing secret, or disabled because the configured secret is unusable.
+ */
+type Signing =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'disabled' }
+  | { readonly kind: 'secret'; readonly secret: string }
+
+/**
+ * Append DingTalk's `timestamp` and HMAC-SHA256 signature to a webhook URL.
+ * The signature covers `timestamp + "\n" + secret`; the secret itself never
+ * appears in the URL.
+ */
+export function signedDingtalkUrl(webhookUrl: URL, secret: string, timestampMs: number = Date.now()): URL {
+  const timestamp = String(timestampMs)
+  const sign = createHmac('sha256', secret).update(`${timestamp}\n${secret}`).digest('base64')
+  const signed = new URL(webhookUrl)
+  signed.searchParams.set('timestamp', timestamp)
+  signed.searchParams.set('sign', sign)
+  return signed
 }
 
 /** One pending or coalesced push decision. */
@@ -271,13 +310,15 @@ export async function apply(
     }
     const url = await resolveWebhookUrl(sessionId)
     if (url === undefined) return
+    const signing = await resolveSigning(sessionId)
+    if (signing.kind === 'disabled') return
     const portalUrl = settings.portalBaseUrl?.href
     const message = renderDeliveryMessage(settings.provider, work.incident, {
       sessionId,
       reportRevision: work.reportRevision,
       ...(portalUrl === undefined ? {} : { portalUrl }),
     })
-    const failure = await deliver(url, message)
+    const failure = await deliver(url, message, signing)
     if (disposed) return
     if (failure === undefined) {
       delivered.add(sessionId)
@@ -322,12 +363,37 @@ export async function apply(
     }
   }
 
-  async function deliver(url: URL, message: DeliveryMessage): Promise<AiopsDeliveryError | undefined> {
+  /**
+   * Resolve DingTalk's optional signing secret per delivery, so rotating it
+   * needs no restart. Keyword mode is the absence of a configured secret; a
+   * configured but unusable secret disables the push instead of sending a
+   * message DingTalk will reject.
+   */
+  async function resolveSigning(sessionId: string): Promise<Signing> {
+    if (settings.provider !== 'dingtalk' || settings.signSecretEnv === '') return { kind: 'none' }
+    let secret = ''
+    try {
+      const credential = await ctx.credentials.resolve(credentialRef(settings.signSecretEnv))
+      secret = credential?.value?.trim() ?? ''
+    } catch (error: unknown) {
+      warnOnce(sessionId, `credential "${settings.signSecretEnv}" could not be resolved; DingTalk delivery is disabled.`)
+      ctx.logger.warn('aiops-delivery: DingTalk signing credential resolution failure.', error)
+      return { kind: 'disabled' }
+    }
+    if (secret === '') {
+      warnOnce(sessionId, `credential "${settings.signSecretEnv}" is empty or missing; DingTalk delivery is disabled.`)
+      return { kind: 'disabled' }
+    }
+    return { kind: 'secret', secret }
+  }
+
+  async function deliver(url: URL, message: DeliveryMessage, signing: Signing): Promise<AiopsDeliveryError | undefined> {
     let lastError = new AiopsDeliveryError('transport', 'delivery was not attempted.')
     for (let attempt = 1; attempt <= settings.maxAttempts; attempt += 1) {
       if (disposed) return undefined
       try {
-        await postOnce(url, message.body)
+        const attemptUrl = signing.kind === 'secret' ? signedDingtalkUrl(url, signing.secret) : url
+        await postOnce(attemptUrl, message.body)
         return undefined
       } catch (error: unknown) {
         lastError = error instanceof AiopsDeliveryError
